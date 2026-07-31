@@ -1,0 +1,9 @@
+# The dance-off Gymnasium env — pulls lockstep-train (the platform's
+# game-agnostic wasm-stepping host), gymnasium, and numpy transitively, and
+# carries the prebuilt agent-shell components the bundle needs.
+lockstep-game-dance-off>=0.1.1
+
+# Training + export stack (train/ uses these; the env itself does not).
+torch>=2.4
+onnx>=1.16
+onnxruntime>=1.18

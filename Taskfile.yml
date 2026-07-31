@@ -1,0 +1,78 @@
+# The template's entire surface. Every task uses the repo-local .venv
+# explicitly — no shell activation, no global installs.
+version: "3"
+
+dotenv: [".env"]
+
+vars:
+  VENV: "{{.ROOT_DIR}}/.venv"
+  PY: "{{.VENV}}/bin/python"
+  # The engine you train against and play with: a REAL published dance-off
+  # release from the public CDN, pinned so training and matches are
+  # reproducible. Newer releases appear under .../games/dance-off/releases/.
+  ENGINE_URL: "https://cdn.lockstep.mediabucket.io/games/dance-off/releases/0.5.2/servo-assist/engine.wasm"
+
+tasks:
+  setup:
+    desc: "Create .venv and install the training stack (gym env + torch + onnx)."
+    cmds:
+      - python3 -m venv "{{.VENV}}"
+      - '"{{.VENV}}/bin/pip" install --upgrade pip'
+      - '"{{.VENV}}/bin/pip" install -r requirements.txt'
+      - echo "✓ setup complete — next: task train"
+
+  engine:
+    desc: "Download the pinned engine wasm (no-op if already present)."
+    status:
+      - test -f out/engine.wasm
+    cmds:
+      - mkdir -p out
+      - curl -fsSL "{{.ENGINE_URL}}" -o out/engine.wasm
+      - echo "→ out/engine.wasm"
+
+  train:
+    desc: "PPO → ONNX → parity check → stage out/agent-bundle. STEPS=8192 MODE=servo-assist"
+    deps: [engine]
+    vars:
+      STEPS: '{{.STEPS | default "8192"}}'
+      MODE: '{{.MODE | default "servo-assist"}}'
+    cmds:
+      - '"{{.PY}}" -m train.main --mode "{{.MODE}}" --steps {{.STEPS}} --engine out/engine.wasm'
+
+  match:
+    desc: "Run a real local match with your trained bundle in both seats."
+    deps: [engine]
+    preconditions:
+      - sh: command -v lockstep
+        msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.games/install.sh | sh"
+      - sh: test -f out/agent-bundle/lockstep.toml
+        msg: "no trained bundle yet — run: task train"
+    cmds:
+      - |
+        lockstep match run --slug dance-off \
+          --engine out/engine.wasm \
+          --agents out/agent-bundle out/agent-bundle \
+          --seed-hex 0703 \
+          --out out/archive.bin
+      - echo "✓ match archived → out/archive.bin"
+
+  upload:
+    desc: "Upload the bundle to compete. Needs LOCKSTEP_API_KEY in .env. AGENT_ID=<id> for a revision."
+    preconditions:
+      - sh: command -v lockstep
+        msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.games/install.sh | sh"
+      - sh: test -f out/agent-bundle/lockstep.toml
+        msg: "no trained bundle yet — run: task train"
+      - sh: test -n "${LOCKSTEP_API_KEY:-}"
+        msg: "LOCKSTEP_API_KEY not set — copy .env.example to .env and fill it in"
+    vars:
+      NAME: '{{.NAME | default "my-dancer"}}'
+    cmds:
+      - |
+        set -e
+        if [ -n "{{.AGENT_ID}}" ]; then
+          lockstep agent upload --bundle out/agent-bundle --agent-id "{{.AGENT_ID}}"
+        else
+          lockstep agent upload --bundle out/agent-bundle \
+            --display-name "{{.NAME}}" --game-id dance-off
+        fi
