@@ -43,8 +43,10 @@ against is the *same WASM binary* that runs ranked matches.
 - A supported platform: macOS arm64 (11.0+), Linux x86_64/arm64
   (glibc ≥ 2.38 — Ubuntu 24.04, Debian 13, Fedora 39+), or Windows x86_64.
 
-Rust is **not** required — everything compiled arrives prebuilt (the CLI as a
-binary, the engine and agent shell as WASM inside the wheels).
+Rust is **not** required for the training path — everything compiled arrives
+prebuilt (the CLI as a binary, the engine and agent shell as WASM inside the
+wheels). The optional [pure-Rust agent example](#the-wasm-story) needs a Rust
+toolchain with `rustup target add wasm32-wasip2`.
 
 For `task upload` only: an API key. Copy `.env.example` to `.env` and fill in
 `LOCKSTEP_API_KEY` (create a key from your account at lockstep.games).
@@ -69,7 +71,9 @@ hand-written no-training agent — with real captured output.
 | `task engine` | Downloads the pinned engine wasm to `out/engine.wasm` (automatic before train/match; no-op if present). |
 | `task train` | PPO against the real engine → ONNX export → torch/onnxruntime parity check → stages `out/agent-bundle/`. Vars: `STEPS` (default 8192), `MODE` (default `servo-assist`). |
 | `task scripted` | Builds the NON-trained example agent ([`examples/scripted_agent.py`](examples/scripted_agent.py)) → `out/scripted-bundle/`. No RL involved. |
-| `task match` | `lockstep match run` with a bundle in both seats (self-play); writes `out/archive.bin`. Var: `BUNDLE` (default `out/agent-bundle`; use `out/scripted-bundle` for the scripted agent). |
+| `task match` | `lockstep match run` with a bundle in both seats (self-play); writes `out/archive.bin`. Var: `BUNDLE` — a bundle dir (`out/agent-bundle`, `out/scripted-bundle`) or a bare `.wasm` component (the Rust agent). |
+| `task rust-agent` | Builds [`examples/rust-agent/`](examples/rust-agent/) — an agent authored directly in Rust → wasm component, from public contracts only. Needs `rustup target add wasm32-wasip2`. |
+| `task contract` | Refreshes the vendored public contract (agent WIT + `dance-off.fbs`) from the [lockstep-interface](https://github.com/lockstep-arena/lockstep-interface) repo. |
 | `task upload` | `lockstep agent upload` of the bundle. Vars: `NAME` (display name), `AGENT_ID` (upload as a revision instead of creating). |
 
 ## Recipes
@@ -164,19 +168,41 @@ out/             build products (gitignored)
   timings are indicative only — the watch page's per-tick charts are
   authoritative.
 
+## The wasm story
+
+An agent IS a wasm component implementing the public
+[`lockstep:agent` world](https://github.com/lockstep-arena/lockstep-interface):
+opaque bytes in (the View), opaque bytes out (the Input). What those bytes
+mean is dance-off's **FlatBuffers contract** —
+[`games/dance-off/dance-off.fbs`](https://github.com/lockstep-arena/lockstep-interface/blob/main/games/dance-off/dance-off.fbs)
+in the same public repo — codegen-able for any language that compiles to a
+wasm component. Two ways to get a component:
+
+1. **Don't write one** (the training path): the wheel ships a prebuilt shell
+   that feeds `artifacts/policy.onnx` to the host inference capability —
+   `task train` / `task scripted` stage it for you.
+2. **Write your own** ([`examples/rust-agent/`](examples/rust-agent/)): ~70
+   lines of Rust against the vendored WIT + planus-generated wire types,
+   `task rust-agent` → a 64 KB component, runnable and uploadable as a bare
+   `.wasm`. Any flatc-supported language works the same way.
+
 ## The contract
 
-Everything in `train/` is replaceable. Only two things are load-bearing for
-the platform:
+Everything in `train/` is replaceable. Only these are load-bearing for the
+platform:
 
-1. **The ONNX signature** — inputs `marquee` `f32[1,1,64,256]` and `agent`
-   `f32[1,62]`, output `action` `f32[1,ACTION_LEN]` (48 servo-assist / 36
-   raw-torque), bound by NAME. `export.py`'s parity check enforces it.
-2. **The bundle layout** — `lockstep.toml` + `component.wasm` +
-   `artifacts/policy.onnx`, staged by `main.py`.
+1. **The wire contract** — `dance-off.fbs` (above): the View you receive and
+   this mode's Input you return, versioned by the engine's
+   `payload_schema_version` (currently 6).
+2. **The ONNX signature** (training path only) — inputs `marquee`
+   `f32[1,1,64,256]` and `agent` `f32[1,62]`, output `action`
+   `f32[1,ACTION_LEN]` (48 servo-assist / 36 raw-torque), bound by NAME.
+   `export.py`'s parity check enforces it.
+3. **The bundle layout** (training path only) — `lockstep.toml` +
+   `component.wasm` + `artifacts/policy.onnx`, staged by `main.py`.
 
-The full observation/action semantics are documented in
-`lockstep_dance_off.env` (installed with the wheel) and on the
+The full observation/action semantics are documented in the `.fbs` itself,
+in `lockstep_dance_off.env` (installed with the wheel), and on the
 [dance-off interface page](https://lockstep.games/games/dance-off/interface?mode=servo-assist).
 
 ## License

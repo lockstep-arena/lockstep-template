@@ -1,0 +1,58 @@
+package lockstep:inference@0.1.0;
+
+/// Wraps the [`inference`] interface in a host-only world. The
+/// platform's wasm-runtime targets this world with `bindgen!` to
+/// generate one canonical Rust module of inference types + a Host
+/// trait. Every per-game player bindgen uses a `with:` directive to
+/// point at this same module so a single Host impl handles every
+/// game's inference calls.
+///
+/// Guests should NOT target this world — it exists for the HOST. Agents
+/// target `lockstep:agent`'s `agent` world, which imports the [`inference`]
+/// interface directly (and so needs the Host registered on the linker the
+/// platform sets up).
+///
+/// That used to read "agents implement their game's `player-<role>` world".
+/// Those worlds are gone: per-game player WITs died when payloads became
+/// opaque bytes, and `world agent` was then split out of `lockstep:engine`
+/// into its own package. There is now ONE agent world, shared by every game.
+world host {
+    import inference;
+}
+
+/// Host-provided inference capability.
+///
+/// The platform implements this in Rust on top of the ONNX runtime;
+/// guest WASM components import it but cannot implement it.
+///
+/// EVERY agent gets it: `lockstep:agent`'s `agent` world imports this
+/// unconditionally and the host always installs it on the linker, so there is
+/// nothing for an agent to opt into. An agent shipping a hand-written policy
+/// simply never calls `infer`. (There is no per-game opt-in any more — games
+/// no longer author player WITs of their own.)
+///
+/// The `artifact` argument is a name declared in the agent bundle's
+/// `lockstep.toml` (e.g. `"policy"`); the host resolves it relative to
+/// the running agent's bundle. Guests do not see global model IDs —
+/// names are scoped to their own bundle.
+interface inference {
+    use types.{named-tensor, inference-error};
+
+    /// Run inference on the named artifact.
+    ///
+    /// The host:
+    ///   1. resolves `artifact` against the current agent's bundle;
+    ///   2. validates input tensor shapes / dtypes against the loaded
+    ///      model's declared signature;
+    ///   3. enforces per-tick + per-call budgets (see `docs/resources.md`);
+    ///   4. invokes ORT and returns the model's outputs as a list of
+    ///      named tensors.
+    ///
+    /// On any failure the call returns `result::err(inference-error)`
+    /// rather than trapping; the guest may fall back to a hand-coded
+    /// policy.
+    infer: func(
+        artifact: string,
+        inputs: list<named-tensor>,
+    ) -> result<list<named-tensor>, inference-error>;
+}

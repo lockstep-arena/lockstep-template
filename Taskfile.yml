@@ -10,7 +10,9 @@ vars:
   # The engine you train against and play with: a REAL published dance-off
   # release from the public CDN, pinned so training and matches are
   # reproducible. Newer releases appear under .../games/dance-off/releases/.
-  ENGINE_URL: "https://cdn.lockstep.mediabucket.io/games/dance-off/releases/0.5.2/servo-assist/engine.wasm"
+  # 0.6.0 = payload schema v6 (FlatBuffers agent surface) — requires
+  # lockstep-game-dance-off >= 0.2.0 (see requirements.txt).
+  ENGINE_URL: "https://cdn.lockstep.mediabucket.io/games/dance-off/releases/0.6.0/servo-assist/engine.wasm"
 
 tasks:
   setup:
@@ -44,6 +46,27 @@ tasks:
     cmds:
       - '"{{.PY}}" -m examples.scripted_agent'
 
+  contract:
+    desc: "Refresh the vendored public contract (WIT + dance-off.fbs) from lockstep-interface."
+    cmds:
+      - |
+        set -e
+        TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+        git clone --quiet --depth 1 https://github.com/lockstep-arena/lockstep-interface "$TMP/iface"
+        cp "$TMP/iface/games/dance-off/dance-off.fbs" examples/rust-agent/contract/dance-off.fbs
+        rm -rf examples/rust-agent/wit
+        # -RL: the repo's wit uses symlinks for deps; vendored copies are real.
+        cp -RL "$TMP/iface/wit/agent-v0.1" examples/rust-agent/wit
+        echo "→ refreshed examples/rust-agent/{contract,wit} — if the .fbs changed:"
+        echo "  planus rust -o examples/rust-agent/src/wire.rs examples/rust-agent/contract/dance-off.fbs"
+
+  rust-agent:
+    desc: "Build the pure-Rust example agent → a bare wasm component (needs rustup target add wasm32-wasip2)."
+    cmds:
+      - cargo build --release --target wasm32-wasip2 --manifest-path examples/rust-agent/Cargo.toml
+      - 'echo "→ examples/rust-agent/target/wasm32-wasip2/release/rust_agent.wasm"'
+      - 'echo "Run it:  task match BUNDLE=examples/rust-agent/target/wasm32-wasip2/release/rust_agent.wasm"'
+
   match:
     desc: "Run a real local match with a bundle in both seats. BUNDLE=out/agent-bundle"
     deps: [engine]
@@ -52,8 +75,8 @@ tasks:
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.games/install.sh | sh"
-      - sh: test -f {{.BUNDLE}}/lockstep.toml
-        msg: "no bundle at {{.BUNDLE}} — run `task train` (or `task scripted` for out/scripted-bundle)"
+      - sh: test -f {{.BUNDLE}}/lockstep.toml || test -f {{.BUNDLE}}
+        msg: "nothing at {{.BUNDLE}} — `task train`, `task scripted`, or `task rust-agent` first"
     cmds:
       - |
         lockstep match run --slug dance-off \

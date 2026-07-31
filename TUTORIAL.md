@@ -20,6 +20,7 @@ and `task setup`.
 
 - [Poke the environment first](#poke-the-environment-first)
 - [Part 1 — a non-trained agent](#part-1--a-non-trained-agent)
+- [Part 1½ — the same idea in pure Rust](#part-1--the-same-idea-in-pure-rust)
 - [Part 2 — a trained agent](#part-2--a-trained-agent)
 - [Part 3 — reading a match](#part-3--reading-a-match)
 - [Part 4 — compete](#part-4--compete)
@@ -119,6 +120,39 @@ mean-posture:       0.99
 
 A 1.6 KB ONNX file that does nothing but stand steady and sway scores **137
 points with zero falls**. Remember that number.
+
+## Part 1½ — the same idea in pure Rust
+
+The sway bot again — but this time with **no Python, no ONNX, no prebuilt
+shell**. [`examples/rust-agent/`](examples/rust-agent/) implements the public
+`lockstep:agent` WIT world directly and speaks the public FlatBuffers
+contract ([`dance-off.fbs`](https://github.com/lockstep-arena/lockstep-interface/blob/main/games/dance-off/dance-off.fbs));
+`task contract` refreshes both from the lockstep-interface repo. The View is
+read zero-copy — the 16 KB marquee raster is never even touched:
+
+```rust
+fn on_tick(view: Vec<u8>) -> Vec<u8> {
+    let tick = ViewRef::read_as_root(&view).and_then(|v| v.tick()).unwrap_or(0);
+    let wave = 0.35 * libm::sinf(tick as f32 / 60.0 * 3.0);
+    // …two joints sway, even effort, planus-build a ServoInput…
+}
+```
+
+```sh
+rustup target add wasm32-wasip2
+task rust-agent
+task match BUNDLE=examples/rust-agent/target/wasm32-wasip2/release/rust_agent.wasm
+```
+
+```
+match finished: 2773 frames, rankings [0, 1], winner Some(0)
+top-score:      299.9
+falls:          0
+```
+
+A 64 KB component, from public contracts only — and it out-scores both the
+Python sway bot and the smoke-trained policy. Any language that compiles to
+a wasm component can do exactly this from the same `.fbs`.
 
 ## Part 2 — a trained agent
 
