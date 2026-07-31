@@ -37,9 +37,12 @@ OUT_DIR = Path("out")
 BUNDLE_DIR = OUT_DIR / "agent-bundle"
 
 
-def stage(mode: str, onnx: Path) -> Path:
-    """Write the agent bundle for ``mode`` and return its directory."""
-    bundle = BUNDLE_DIR
+def stage(mode: str, onnx: Path, bundle: Path = BUNDLE_DIR) -> Path:
+    """Write the agent bundle for ``mode`` and return its directory.
+
+    ``bundle`` defaults to the trained agent's home; the scripted example
+    stages to its own directory so the two can coexist.
+    """
     (bundle / "artifacts").mkdir(parents=True, exist_ok=True)
     (bundle / "artifacts/policy.onnx").write_bytes(onnx.read_bytes())
     shutil.copyfile(agent_component_path(mode), bundle / "component.wasm")

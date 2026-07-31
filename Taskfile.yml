@@ -39,19 +39,26 @@ tasks:
     cmds:
       - '"{{.PY}}" -m train.main --mode "{{.MODE}}" --steps {{.STEPS}} --engine out/engine.wasm'
 
+  scripted:
+    desc: "Build the NON-trained example agent (examples/scripted_agent.py) → out/scripted-bundle."
+    cmds:
+      - '"{{.PY}}" -m examples.scripted_agent'
+
   match:
-    desc: "Run a real local match with your trained bundle in both seats."
+    desc: "Run a real local match with a bundle in both seats. BUNDLE=out/agent-bundle"
     deps: [engine]
+    vars:
+      BUNDLE: '{{.BUNDLE | default "out/agent-bundle"}}'
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.games/install.sh | sh"
-      - sh: test -f out/agent-bundle/lockstep.toml
-        msg: "no trained bundle yet — run: task train"
+      - sh: test -f {{.BUNDLE}}/lockstep.toml
+        msg: "no bundle at {{.BUNDLE}} — run `task train` (or `task scripted` for out/scripted-bundle)"
     cmds:
       - |
         lockstep match run --slug dance-off \
           --engine out/engine.wasm \
-          --agents out/agent-bundle out/agent-bundle \
+          --agents {{.BUNDLE}} {{.BUNDLE}} \
           --seed-hex 0703 \
           --out out/archive.bin
       - echo "✓ match archived → out/archive.bin"

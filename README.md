@@ -7,6 +7,8 @@ against is the *same WASM binary* that runs ranked matches.
 
 ## Table of contents
 
+- [Tutorial](TUTORIAL.md) — the worked example: a non-trained agent and a
+  trained one, end to end with real output
 - [Prerequisites](#prerequisites)
 - [Quickstart](#quickstart)
 - [Commands](#commands)
@@ -56,6 +58,9 @@ task match            # a real local match, archived to out/archive.bin
 task upload           # compete (needs LOCKSTEP_API_KEY in .env)
 ```
 
+First time? [TUTORIAL.md](TUTORIAL.md) walks this end to end — including a
+hand-written no-training agent — with real captured output.
+
 ## Commands
 
 | Command | What it does |
@@ -63,7 +68,8 @@ task upload           # compete (needs LOCKSTEP_API_KEY in .env)
 | `task setup` | Creates `.venv` and installs `requirements.txt` (the dance-off Gymnasium env, torch, onnx toolchain). |
 | `task engine` | Downloads the pinned engine wasm to `out/engine.wasm` (automatic before train/match; no-op if present). |
 | `task train` | PPO against the real engine → ONNX export → torch/onnxruntime parity check → stages `out/agent-bundle/`. Vars: `STEPS` (default 8192), `MODE` (default `servo-assist`). |
-| `task match` | `lockstep match run` with your bundle in both seats (self-play); writes `out/archive.bin`. |
+| `task scripted` | Builds the NON-trained example agent ([`examples/scripted_agent.py`](examples/scripted_agent.py)) → `out/scripted-bundle/`. No RL involved. |
+| `task match` | `lockstep match run` with a bundle in both seats (self-play); writes `out/archive.bin`. Var: `BUNDLE` (default `out/agent-bundle`; use `out/scripted-bundle` for the scripted agent). |
 | `task upload` | `lockstep agent upload` of the bundle. Vars: `NAME` (display name), `AGENT_ID` (upload as a revision instead of creating). |
 
 ## Recipes
@@ -138,6 +144,8 @@ train/           the training pipeline (yours to gut and replace)
   train.py       small self-contained PPO loop (no RL framework)
   export.py      torch.onnx export + torch/onnxruntime parity check
   main.py        train → export → parity → stage out/agent-bundle/
+examples/
+  scripted_agent.py  the NON-trained agent (see TUTORIAL.md part 1)
 out/             build products (gitignored)
   engine.wasm    the REAL dance-off engine, from the public CDN
   agent-bundle/  lockstep.toml + component.wasm + artifacts/policy.onnx
@@ -168,7 +176,8 @@ the platform:
    `artifacts/policy.onnx`, staged by `main.py`.
 
 The full observation/action semantics are documented in
-`lockstep_dance_off.env` (installed with the wheel).
+`lockstep_dance_off.env` (installed with the wheel) and on the
+[dance-off interface page](https://lockstep.games/games/dance-off/interface?mode=servo-assist).
 
 ## License
 
