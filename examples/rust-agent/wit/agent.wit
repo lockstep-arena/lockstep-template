@@ -1,0 +1,86 @@
+package lockstep:agent@0.1.0;
+
+/// The agent world — one instance per seat per match. Wild third-party code:
+/// fueled, epoch-bounded, memory-limited by the host.
+///
+/// This used to live inside `lockstep:engine`, which was a leftover from when
+/// payloads were TYPED in WIT and both sides genuinely shared records. Once
+/// payloads became opaque bytes the only thing the agent still borrowed was
+/// `type payload = list<u8>` — an alias, not a dependency. Agents and engines
+/// are separate entry points and now have separate packages, so an agent build
+/// never resolves physics and an engine build never resolves inference.
+///
+/// INFERENCE IS PART OF THIS WORLD. Every agent gets it: the host always
+/// installs it on the linker, so there is nothing to opt into. An agent that
+/// ships a hand-written policy simply never calls it. This is why agents author
+/// no WIT of their own — they target this world directly.
+///
+/// The agent never sees the physics world, the descriptor, or any other engine
+/// type. It receives opaque bytes and returns opaque bytes; what those bytes
+/// mean is the GAME's schema, versioned by `descriptor.payload-schema-version`
+/// on the engine side.
+world agent {
+    // ── Payload aliases ──────────────────────────────────────────────────
+    //
+    // Declared here rather than borrowed from `lockstep:engine` — they are
+    // `list<u8>` aliases, and sharing one was the only thing that ever coupled
+    // these two packages.
+    //
+    // The NAMES deliberately match the engine's, because these are the same
+    // three byte-streams seen from the other end: the engine's `view-payload`
+    // is what arrives at `on-tick`, and what `on-tick` returns is the engine's
+    // `input-payload`. The agent sees three of the engine's six; it never sees
+    // the session config, the seed, or the archive frame.
+    //
+    // As on the engine side, these are TRANSPARENT aliases — documentation at
+    // the signature, not enforcement.
+
+    /// ENGINE -> this agent, once, before the first tick.
+    ///
+    /// Delivered to `init`. Whatever this seat needs to know up front — its
+    /// index, its starting state, the routine it will be scored against.
+    /// Produced by the engine as `seat-init.payload`.
+    ///
+    /// Schema is the GAME's, versioned by the engine's
+    /// `descriptor.payload-schema-version`. When that bumps, agents built
+    /// against the old schema are marked stale rather than silently
+    /// misreading these bytes.
+    type seat-init-payload = list<u8>;
+
+    /// ENGINE -> this agent, once per tick: this seat's OBSERVATION.
+    ///
+    /// ONLY what the game has decided this seat may know. It is not a view of
+    /// the whole match — an agent cannot see the omniscient archive frame, and
+    /// hidden information stays hidden by simply never being encoded here. Do
+    /// not assume anything absent from these bytes is knowable.
+    ///
+    /// Size-capped by the engine's `descriptor.limits.max-view-bytes`.
+    type view-payload = list<u8>;
+
+    /// This agent -> ENGINE, once per tick: this seat's ACTION.
+    ///
+    /// The return of `on-tick`, and the ONLY way an agent affects the match.
+    /// The engine may reject it; a malformed or oversized input costs the seat
+    /// its turn rather than failing the match.
+    ///
+    /// Size-capped by `descriptor.limits.max-input-bytes` — the tightest of
+    /// the engine's three limits, because this is the one bytestream produced
+    /// by wild third-party code.
+    type input-payload = list<u8>;
+
+    /// Host-provided ML inference. Optional in practice: an agent may ignore
+    /// it entirely and ship a hand-written policy.
+    ///
+    /// RESOLVED VIA A LOCAL SYMLINK: `agent-v0.1/deps/inference` points at the
+    /// sibling `../../inference-v0.1` in this same repo. No registry fetch, no
+    /// vendored copy. If this import ever fails to resolve, check that symlink
+    /// first — renaming the inference directory silently breaks it. Same
+    /// arrangement, and same caveat, as engine's `deps/physics`.
+    import lockstep:inference/inference@0.1.0;
+
+    /// One-time per-seat setup. The bytes are this game's seat-init payload.
+    export init: func(init-state: seat-init-payload);
+
+    /// Receive this tick's view, return this tick's input.
+    export on-tick: func(view: view-payload) -> input-payload;
+}

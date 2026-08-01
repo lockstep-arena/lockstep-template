@@ -1,0 +1,75 @@
+package lockstep:inference@0.1.0;
+
+/// Tensor + error types shared by the inference capability.
+///
+/// This WIT is intentionally generic and framework-agnostic. The host
+/// implements it on top of an ONNX runtime today; tomorrow it could be
+/// a TFLite or pure-Rust backend with no impact on guests.
+interface types {
+    /// Element types accepted by `infer`. Mirror the common ONNX
+    /// element types — guests pick the variant that matches what their
+    /// model declares for each input/output. Variant names are spelled
+    /// out (`float32`, not `f32`) because `f32` is reserved as a WIT
+    /// keyword. Backends are free to reject combinations they don't
+    /// support and surface the failure as `inference-error::backend-error(...)`.
+    enum dtype {
+        float32,
+        float64,
+        int32,
+        int64,
+        uint8,
+    }
+
+    /// Tensor element bytes, tagged by element type.
+    ///
+    /// Element count is `shape.iter().product()`; the host validates
+    /// `data.len() == prod(shape)` before invoking the backend.
+    variant tensor-data {
+        float32(list<f32>),
+        float64(list<f64>),
+        int32(list<s32>),
+        int64(list<s64>),
+        uint8(list<u8>),
+    }
+
+    /// A single tensor. Shape is row-major (NCHW / NHWC etc. — the
+    /// runtime hands the tensor to the model as-is; agents must match
+    /// whatever layout their exported ONNX expects).
+    record tensor {
+        shape: list<u32>,
+        data: tensor-data,
+    }
+
+    /// A tensor paired with the input/output name it binds to in the
+    /// underlying model. The name MUST match a name declared in the
+    /// model's input/output signature; the backend looks them up by
+    /// string at call time.
+    record named-tensor {
+        name: string,
+        tensor: tensor,
+    }
+
+    /// Failure modes for `infer`. Each is a structured variant carrying
+    /// a human-readable string; the host never panics or traps — every
+    /// error is delivered to the guest as a `result::err(...)` so
+    /// guests can fall back to a hand-coded policy when inference is
+    /// unavailable.
+    variant inference-error {
+        /// The artifact name was not declared in the bundle's
+        /// `lockstep.toml`, or it points at an artifact the host could
+        /// not load.
+        unknown-artifact(string),
+
+        /// Tensor shape, dtype, or input-name mismatch detected before
+        /// the backend was invoked.
+        invalid-input(string),
+
+        /// The underlying backend (ORT, etc.) reported an error during
+        /// model execution. Includes backend timeouts.
+        backend-error(string),
+
+        /// The agent has consumed its per-tick or per-call inference
+        /// budget. See `docs/resources.md`.
+        quota-exceeded(string),
+    }
+}

@@ -1,0 +1,112 @@
+// The dance-off AGENT-FACING wire contract — payload schema v6.
+//
+// CANONICAL HOME: this repo (LOCKSTEP-INTERFACE, public), games/dance-off/.
+// The game-agnostic WIT worlds live in wit/ at the repo root; this file is
+// the game-SPECIFIC half of the contract: what the opaque bytes crossing
+// those worlds mean for dance-off.
+//
+// This file IS the cross-language contract: agents in any language that
+// compiles to a wasm component (Rust, Python, JS/TS, Go, C#, …) codegen
+// from it with standard `flatc`; the platform's own Rust uses planus
+// (an alternative compiler for the same FlatBuffers wire format). It is
+// displayed verbatim on the game's interface tab.
+//
+// Three messages cross the boundary, each encoded as its own root:
+//   SeatInit     engine → agent, once at reset
+//   View         engine → agent, every tick (observation)
+//   ServoInput / TorqueInput
+//                agent → engine, every tick (this MODE's action — an agent
+//                targets exactly one mode and sends only that mode's input)
+//
+// FlatBuffers was chosen (over bitcode/JSON/protobuf/Cap'n Proto) for
+// zero-copy reads — the marquee raster below is 16 KB per tick and can be
+// read in place — and for pure-language runtimes in every wasm-guest
+// language. The ARCHIVE/replay frames are a separate, platform-internal
+// format and are not part of this contract.
+//
+// Evolution: table fields are append-only (never renumber, never remove —
+// deprecate instead). Hard breaks bump the engine's payload_schema_version,
+// which stales agents deliberately.
+
+namespace dance_off;
+
+/// Quaternion, (x, y, z, w), w scalar.
+struct Quat { x: float; y: float; z: float; w: float; }
+
+/// Rotation-vector / translation triple, engine world units.
+struct Vec3 { x: float; y: float; z: float; }
+
+/// One upcoming card, as structured data: the routine is legible directly —
+/// the strip image is what the board shows, not an OCR puzzle.
+struct CardCue {
+  /// Index into the move vocabulary.
+  move_id: uint32;
+  /// Modifier id; the target pose is composed from (move_id, modifier).
+  modifier: uint32;
+  /// Ticks until this card's centre crosses the hit line. Negative once
+  /// past it while still inside its scoring window.
+  ticks_to_hit: int32;
+}
+
+/// A dancer pose on the wire: pelvis (root) world transform + the 12
+/// joint-local rotations in canonical joint order.
+table Pose {
+  root_translation: Vec3 (required);
+  root_rotation: Quat (required);
+  /// Canonical joint order; short/malformed lists zero-pad to identity.
+  joints: [Quat] (required);
+}
+
+/// Public dancer status (fall/recovery + scoring HUD fields).
+table Status {
+  fallen: bool;
+  down_ticks_left: uint32;
+  combo: uint32;
+  last_move_points: float;
+  falls: uint32;
+}
+
+/// Per-seat init state handed to the agent at reset. Slot only: the routine
+/// seed stays engine-private so the marquee remains the sole goal signal.
+table SeatInit {
+  slot: uint32;
+}
+
+/// Grayscale marquee strip: one byte per pixel, row-major, y-down.
+table Marquee {
+  width: uint32;
+  height: uint32;
+  pixels: [ubyte] (required);
+}
+
+/// One dancer as seen in an observation: identified by slot only.
+table DancerObs {
+  slot: uint32;
+  pose: Pose (required);
+  status: Status (required);
+  score: float;
+}
+
+/// Everything an agent perceives each tick.
+table View {
+  tick: uint64;
+  marquee: Marquee (required);
+  /// The next few cards, nearest hit first.
+  upcoming: [CardCue] (required);
+  myself: DancerObs (required);
+  opponent: DancerObs (required);
+}
+
+/// servo-assist action: target rotation-vectors (radians, canonical joint
+/// order; zero-pad/truncate) + per-joint share of the whole-body torque
+/// budget (empty = spread uniformly).
+table ServoInput {
+  joints: [Vec3] (required);
+  effort: [float] (required);
+}
+
+/// raw-torque action: per-joint torque (N·m; the engine clamps per joint
+/// and against the budget). No servo runs in this tier.
+table TorqueInput {
+  torques: [Vec3] (required);
+}
