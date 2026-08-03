@@ -124,10 +124,12 @@ points with zero falls**. Remember that number.
 ## Part 1½ — the same idea in pure Rust
 
 The sway bot again — but this time with **no Python, no ONNX, no prebuilt
-shell**. [`examples/rust-agent/`](examples/rust-agent/) implements the public
-`lockstep:agent` WIT world directly and speaks the public FlatBuffers
-contract ([`dance-off.fbs`](https://github.com/lockstep-arena/lockstep-interface/blob/main/games/dance-off/dance-off.fbs));
-`task contract` refreshes both from the lockstep-interface repo. The View is
+shell**. [`examples/rust-agent/`](examples/rust-agent/) implements the
+`lockstep:agent` WIT world directly (vendored under its `wit/`) and speaks
+the published FlatBuffers contract
+([`contract.fbs`](https://cdn.lockstep.mediabucket.io/games/dance-off/releases/0.6.1/servo-assist/contract.fbs),
+vendored at `contract/dance-off.fbs`); `task contract` refreshes the vendored
+copy from the CDN release the engine pin points at. The View is
 read zero-copy — the 16 KB marquee raster is never even touched:
 
 ```rust

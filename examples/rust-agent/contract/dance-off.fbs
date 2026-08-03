@@ -1,31 +1,18 @@
-// The dance-off AGENT-FACING wire contract — payload schema v6.
+// The dance-off agent-facing wire contract — payload schema v6.
 //
-// CANONICAL HOME: this repo (LOCKSTEP-INTERFACE, public), games/dance-off/.
-// The game-agnostic WIT worlds live in wit/ at the repo root; this file is
-// the game-SPECIFIC half of the contract: what the opaque bytes crossing
-// those worlds mean for dance-off.
+// Three messages cross the engine ⇄ agent boundary, each as its own root:
 //
-// This file IS the cross-language contract: agents in any language that
-// compiles to a wasm component (Rust, Python, JS/TS, Go, C#, …) codegen
-// from it with standard `flatc`; the platform's own Rust uses planus
-// (an alternative compiler for the same FlatBuffers wire format). It is
-// displayed verbatim on the game's interface tab.
+//   SeatInit                 engine → agent, once at reset
+//   View                     engine → agent, every tick (observation)
+//   ServoInput / TorqueInput agent → engine, every tick (an agent targets
+//                            exactly one mode and sends that mode's input)
 //
-// Three messages cross the boundary, each encoded as its own root:
-//   SeatInit     engine → agent, once at reset
-//   View         engine → agent, every tick (observation)
-//   ServoInput / TorqueInput
-//                agent → engine, every tick (this MODE's action — an agent
-//                targets exactly one mode and sends only that mode's input)
+// Codegen from this file with standard `flatc` in any language; the
+// platform's own Rust uses planus. Replay archives are a separate,
+// platform-internal format — not part of this contract.
 //
-// FlatBuffers was chosen (over bitcode/JSON/protobuf/Cap'n Proto) for
-// zero-copy reads — the marquee raster below is 16 KB per tick and can be
-// read in place — and for pure-language runtimes in every wasm-guest
-// language. The ARCHIVE/replay frames are a separate, platform-internal
-// format and are not part of this contract.
-//
-// Evolution: table fields are append-only (never renumber, never remove —
-// deprecate instead). Hard breaks bump the engine's payload_schema_version,
+// Evolution: table fields are append-only — never renumber or remove,
+// deprecate instead. Hard breaks bump the engine's payload_schema_version,
 // which stales agents deliberately.
 
 namespace dance_off;

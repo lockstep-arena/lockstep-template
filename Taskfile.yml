@@ -10,9 +10,10 @@ vars:
   # The engine you train against and play with: a REAL published dance-off
   # release from the public CDN, pinned so training and matches are
   # reproducible. Newer releases appear under .../games/dance-off/releases/.
-  # 0.6.0 = payload schema v6 (FlatBuffers agent surface) — requires
-  # lockstep-game-dance-off >= 0.2.0 (see requirements.txt).
-  ENGINE_URL: "https://cdn.lockstep.mediabucket.io/games/dance-off/releases/0.6.0/servo-assist/engine.wasm"
+  # 0.6.x = payload schema v6 (FlatBuffers agent surface) — requires
+  # lockstep-game-dance-off >= 0.2.0 (see requirements.txt). The release's
+  # contract.fbs sits next to the engine (task contract pulls it from there).
+  ENGINE_URL: "https://cdn.lockstep.mediabucket.io/games/dance-off/releases/0.6.1/servo-assist/engine.wasm"
 
 tasks:
   setup:
@@ -47,17 +48,18 @@ tasks:
       - '"{{.PY}}" -m examples.scripted_agent'
 
   contract:
-    desc: "Refresh the vendored public contract (WIT + dance-off.fbs) from lockstep-interface."
+    desc: "Refresh the vendored dance-off.fbs from the CDN release ENGINE_URL pins (the agent WIT is vendored in this repo and updated with it)."
     cmds:
       - |
         set -e
-        TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-        git clone --quiet --depth 1 https://github.com/lockstep-arena/lockstep-interface "$TMP/iface"
-        cp "$TMP/iface/games/dance-off/dance-off.fbs" examples/rust-agent/contract/dance-off.fbs
-        rm -rf examples/rust-agent/wit
-        # -RL: the repo's wit uses symlinks for deps; vendored copies are real.
-        cp -RL "$TMP/iface/wit/agent-v0.1" examples/rust-agent/wit
-        echo "→ refreshed examples/rust-agent/{contract,wit} — if the .fbs changed:"
+        # The contract is published NEXT TO the engine wasm of every release,
+        # so the refresh is always the contract of the exact engine you train
+        # against — same directory, same version, no credentials needed.
+        CONTRACT_URL="$(dirname "{{.ENGINE_URL}}")/contract.fbs"
+        curl -fsSL "$CONTRACT_URL" -o examples/rust-agent/contract/dance-off.fbs
+        echo "→ refreshed examples/rust-agent/contract/dance-off.fbs"
+        echo "  from $CONTRACT_URL"
+        echo "  if the .fbs changed, regenerate the bindings:"
         echo "  planus rust -o examples/rust-agent/src/wire.rs examples/rust-agent/contract/dance-off.fbs"
 
   rust-agent:

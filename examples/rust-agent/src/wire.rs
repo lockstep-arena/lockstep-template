@@ -17,7 +17,7 @@ mod root {
         ///  Quaternion, (x, y, z, w), w scalar.
         ///
         /// Generated from these locations:
-        /// * Struct `Quat` in the file `examples/rust-agent/contract/dance-off.fbs:34`
+        /// * Struct `Quat` in the file `examples/rust-agent/contract/dance-off.fbs:21`
         #[derive(
             Copy,
             Clone,
@@ -253,7 +253,7 @@ mod root {
         ///  Rotation-vector / translation triple, engine world units.
         ///
         /// Generated from these locations:
-        /// * Struct `Vec3` in the file `examples/rust-agent/contract/dance-off.fbs:37`
+        /// * Struct `Vec3` in the file `examples/rust-agent/contract/dance-off.fbs:24`
         #[derive(
             Copy,
             Clone,
@@ -468,7 +468,7 @@ mod root {
         ///  the strip image is what the board shows, not an OCR puzzle.
         ///
         /// Generated from these locations:
-        /// * Struct `CardCue` in the file `examples/rust-agent/contract/dance-off.fbs:41`
+        /// * Struct `CardCue` in the file `examples/rust-agent/contract/dance-off.fbs:28`
         #[derive(
             Copy,
             Clone,
@@ -697,7 +697,7 @@ mod root {
         ///  joint-local rotations in canonical joint order.
         ///
         /// Generated from these locations:
-        /// * Table `Pose` in the file `examples/rust-agent/contract/dance-off.fbs:53`
+        /// * Table `Pose` in the file `examples/rust-agent/contract/dance-off.fbs:40`
         #[derive(Clone, Debug, PartialEq, PartialOrd, ::serde::Serialize, ::serde::Deserialize)]
         pub struct Pose {
             /// The field `root_translation` in the table `Pose`
@@ -1006,7 +1006,7 @@ mod root {
         ///  Public dancer status (fall/recovery + scoring HUD fields).
         ///
         /// Generated from these locations:
-        /// * Table `Status` in the file `examples/rust-agent/contract/dance-off.fbs:61`
+        /// * Table `Status` in the file `examples/rust-agent/contract/dance-off.fbs:48`
         #[derive(Clone, Debug, PartialEq, PartialOrd, ::serde::Serialize, ::serde::Deserialize)]
         pub struct Status {
             /// The field `fallen` in the table `Status`
@@ -1452,7 +1452,7 @@ mod root {
         ///  seed stays engine-private so the marquee remains the sole goal signal.
         ///
         /// Generated from these locations:
-        /// * Table `SeatInit` in the file `examples/rust-agent/contract/dance-off.fbs:71`
+        /// * Table `SeatInit` in the file `examples/rust-agent/contract/dance-off.fbs:58`
         #[derive(
             Clone,
             Debug,
@@ -1710,7 +1710,7 @@ mod root {
         ///  Grayscale marquee strip: one byte per pixel, row-major, y-down.
         ///
         /// Generated from these locations:
-        /// * Table `Marquee` in the file `examples/rust-agent/contract/dance-off.fbs:76`
+        /// * Table `Marquee` in the file `examples/rust-agent/contract/dance-off.fbs:63`
         #[derive(
             Clone,
             Debug,
@@ -2047,7 +2047,7 @@ mod root {
         ///  One dancer as seen in an observation: identified by slot only.
         ///
         /// Generated from these locations:
-        /// * Table `DancerObs` in the file `examples/rust-agent/contract/dance-off.fbs:83`
+        /// * Table `DancerObs` in the file `examples/rust-agent/contract/dance-off.fbs:70`
         #[derive(Clone, Debug, PartialEq, PartialOrd, ::serde::Serialize, ::serde::Deserialize)]
         pub struct DancerObs {
             /// The field `slot` in the table `DancerObs`
@@ -2416,7 +2416,7 @@ mod root {
         ///  Everything an agent perceives each tick.
         ///
         /// Generated from these locations:
-        /// * Table `View` in the file `examples/rust-agent/contract/dance-off.fbs:91`
+        /// * Table `View` in the file `examples/rust-agent/contract/dance-off.fbs:78`
         #[derive(Clone, Debug, PartialEq, PartialOrd, ::serde::Serialize, ::serde::Deserialize)]
         pub struct View {
             /// The field `tick` in the table `View`
@@ -2809,7 +2809,7 @@ mod root {
         ///  budget (empty = spread uniformly).
         ///
         /// Generated from these locations:
-        /// * Table `ServoInput` in the file `examples/rust-agent/contract/dance-off.fbs:103`
+        /// * Table `ServoInput` in the file `examples/rust-agent/contract/dance-off.fbs:90`
         #[derive(Clone, Debug, PartialEq, PartialOrd, ::serde::Serialize, ::serde::Deserialize)]
         pub struct ServoInput {
             /// The field `joints` in the table `ServoInput`
@@ -3088,7 +3088,7 @@ mod root {
         ///  and against the budget). No servo runs in this tier.
         ///
         /// Generated from these locations:
-        /// * Table `TorqueInput` in the file `examples/rust-agent/contract/dance-off.fbs:110`
+        /// * Table `TorqueInput` in the file `examples/rust-agent/contract/dance-off.fbs:97`
         #[derive(Clone, Debug, PartialEq, PartialOrd, ::serde::Serialize, ::serde::Deserialize)]
         pub struct TorqueInput {
             /// The field `torques` in the table `TorqueInput`

@@ -73,7 +73,7 @@ hand-written no-training agent — with real captured output.
 | `task scripted` | Builds the NON-trained example agent ([`examples/scripted_agent.py`](examples/scripted_agent.py)) → `out/scripted-bundle/`. No RL involved. |
 | `task match` | `lockstep match run` with a bundle in both seats (self-play); writes `out/archive.bin`. Var: `BUNDLE` — a bundle dir (`out/agent-bundle`, `out/scripted-bundle`) or a bare `.wasm` component (the Rust agent). |
 | `task rust-agent` | Builds [`examples/rust-agent/`](examples/rust-agent/) — an agent authored directly in Rust → wasm component, from public contracts only. Needs `rustup target add wasm32-wasip2`. |
-| `task contract` | Refreshes the vendored public contract (agent WIT + `dance-off.fbs`) from the [lockstep-interface](https://github.com/lockstep-arena/lockstep-interface) repo. |
+| `task contract` | Refreshes the vendored `dance-off.fbs` from the CDN release pinned by `ENGINE_URL` (`…/<version>/<mode>/contract.fbs` — the contract of the exact engine you train against). The agent WIT is vendored in this repo. |
 | `task upload` | `lockstep agent upload` of the bundle. Vars: `NAME` (display name), `AGENT_ID` (upload as a revision instead of creating). |
 
 ## Recipes
@@ -170,13 +170,15 @@ out/             build products (gitignored)
 
 ## The wasm story
 
-An agent IS a wasm component implementing the public
-[`lockstep:agent` world](https://github.com/lockstep-arena/lockstep-interface):
+An agent IS a wasm component implementing the `lockstep:agent` world
+(vendored under [`examples/rust-agent/wit/`](examples/rust-agent/wit/)):
 opaque bytes in (the View), opaque bytes out (the Input). What those bytes
-mean is dance-off's **FlatBuffers contract** —
-[`games/dance-off/dance-off.fbs`](https://github.com/lockstep-arena/lockstep-interface/blob/main/games/dance-off/dance-off.fbs)
-in the same public repo — codegen-able for any language that compiles to a
-wasm component. Two ways to get a component:
+mean is dance-off's **FlatBuffers contract** — published next to every engine
+release as
+[`contract.fbs`](https://cdn.lockstep.mediabucket.io/games/dance-off/releases/0.6.1/servo-assist/contract.fbs)
+(and vendored at [`examples/rust-agent/contract/dance-off.fbs`](examples/rust-agent/contract/dance-off.fbs))
+— codegen-able for any language that compiles to a wasm component. Two ways
+to get a component:
 
 1. **Don't write one** (the training path): the wheel ships a prebuilt shell
    that feeds `artifacts/policy.onnx` to the host inference capability —
