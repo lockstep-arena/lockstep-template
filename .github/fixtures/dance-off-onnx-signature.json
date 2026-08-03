@@ -1,0 +1,38 @@
+{
+  "inputs": [
+    {
+      "name": "marquee",
+      "dtype": "FLOAT",
+      "shape": [
+        1,
+        1,
+        64,
+        256
+      ]
+    },
+    {
+      "name": "agent",
+      "dtype": "FLOAT",
+      "shape": [
+        1,
+        62
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "action",
+      "dtype": "FLOAT",
+      "shape": [
+        1,
+        48
+      ]
+    }
+  ],
+  "opset": [
+    [
+      "ai.onnx",
+      17
+    ]
+  ]
+}

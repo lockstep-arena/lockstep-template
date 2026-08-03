@@ -6,6 +6,11 @@ activation, a folded constant, a dtype change — still loads, still runs, and
 still returns numbers of the right shape. Nothing downstream would notice. So
 the export is immediately re-run under onnxruntime, the exact runtime the
 platform's inference host uses, and compared against torch.
+
+The signature is DERIVED from the net (obs Dict keys in, ``action`` out) —
+see :mod:`train.core.policy`. This module is the stable seam: ANY policy
+module exposing the same ``input_names`` / ``input_shapes`` / ``action_len``
+surface can be exported, parity-checked and staged, whatever trained it.
 """
 
 from __future__ import annotations
@@ -15,15 +20,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from .policy import (
-    AGENT_LEN,
-    INPUT_AGENT,
-    INPUT_MARQUEE,
-    MARQUEE_H,
-    MARQUEE_W,
-    OUTPUT_ACTION,
-    Policy,
-)
+from .policy import OUTPUT_ACTION, Policy
 
 #: Largest tolerated difference between torch and onnxruntime, per element.
 #:
@@ -34,30 +31,36 @@ from .policy import (
 PARITY_ATOL = 1e-4
 
 
-def sample_inputs(batch: int = 1) -> tuple[torch.Tensor, torch.Tensor]:
+def sample_inputs(net: Policy, batch: int = 1) -> tuple[torch.Tensor, ...]:
     """Representative inputs for tracing and for the parity check.
 
     Random rather than zeros on purpose: a zero observation would sail through
-    a graph that had lost a bias or a nonlinearity.
+    a graph that had lost a bias or a nonlinearity. Image streams get values
+    in [0, 1] (the normalized range the graph input carries), vectors get
+    standard normals.
     """
     generator = torch.Generator().manual_seed(0)
-    marquee = torch.rand(batch, 1, MARQUEE_H, MARQUEE_W, generator=generator)
-    agent = torch.randn(batch, AGENT_LEN, generator=generator)
-    return marquee, agent
+    tensors = []
+    for name in net.input_names:
+        shape = (batch, *net.input_shapes[name])
+        if len(shape) == 4:
+            tensors.append(torch.rand(*shape, generator=generator))
+        else:
+            tensors.append(torch.randn(*shape, generator=generator))
+    return tuple(tensors)
 
 
 def export(net: Policy, path: str | Path) -> Path:
-    """Write ``path`` as ONNX with the signature the WASM shells expect."""
+    """Write ``path`` as ONNX with the net's derived signature."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     net.eval()
 
-    marquee, agent = sample_inputs()
     torch.onnx.export(
         net,
-        (marquee, agent),
+        sample_inputs(net),
         str(path),
-        input_names=[INPUT_MARQUEE, INPUT_AGENT],
+        input_names=net.input_names,
         output_names=[OUTPUT_ACTION],
         # Fixed batch of 1. The shells send exactly one observation per tick,
         # and a dynamic axis would only add a degree of freedom nobody uses
@@ -83,10 +86,11 @@ def verify(net: Policy, path: str | Path, atol: float = PARITY_ATOL) -> float:
     """
     import onnxruntime as ort
 
-    marquee, agent = sample_inputs()
+    path = Path(path)
+    inputs = sample_inputs(net)
     net.eval()
     with torch.no_grad():
-        expected = net(marquee, agent).numpy()
+        expected = net(*inputs).numpy()
 
     # Belt and braces on the external-data trap above: assert it here too, so
     # a future exporter default cannot quietly reintroduce a sidecar. Loading
@@ -111,7 +115,7 @@ def verify(net: Policy, path: str | Path, atol: float = PARITY_ATOL) -> float:
     session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
 
     got_names = {i.name for i in session.get_inputs()}
-    want_names = {INPUT_MARQUEE, INPUT_AGENT}
+    want_names = set(net.input_names)
     if got_names != want_names:
         raise AssertionError(
             f"exported input names {sorted(got_names)} != {sorted(want_names)}; "
@@ -126,7 +130,7 @@ def verify(net: Policy, path: str | Path, atol: float = PARITY_ATOL) -> float:
 
     (actual,) = session.run(
         [OUTPUT_ACTION],
-        {INPUT_MARQUEE: marquee.numpy(), INPUT_AGENT: agent.numpy()},
+        {name: t.numpy() for name, t in zip(net.input_names, inputs, strict=True)},
     )
 
     if actual.shape != expected.shape:
