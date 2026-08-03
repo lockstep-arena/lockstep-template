@@ -131,13 +131,20 @@ def make_vec_env(
     The default NEXT_STEP mode instead burns the following step on the reset
     — the action is ignored — and a loop that doesn't mask that step out
     trains on a transition that never happened.
+
+    Workers use the SPAWN start method explicitly, on every OS. Linux is the
+    one platform whose default is fork, and forking a process that already
+    imported torch (thread pools, allocator locks) deadlocks the workers —
+    it hung CI's Linux leg while macOS/Windows sailed through. One start
+    method everywhere is the whole point: no OS-specific behavior to debug.
     """
     fns = [
         make_env_factory(spec_module, env_id, mode, engine, time_limit_ticks)
         for _ in range(num_envs)
     ]
-    cls = SyncVectorEnv if num_envs == 1 else AsyncVectorEnv
-    return cls(fns, autoreset_mode=AutoresetMode.SAME_STEP)
+    if num_envs == 1:
+        return SyncVectorEnv(fns, autoreset_mode=AutoresetMode.SAME_STEP)
+    return AsyncVectorEnv(fns, autoreset_mode=AutoresetMode.SAME_STEP, context="spawn")
 
 
 def discounted_advantages(rewards, values, dones, last_value, gamma, lam):
