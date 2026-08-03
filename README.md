@@ -116,8 +116,15 @@ env = AsyncVectorEnv(
         engine_source="out/engine.wasm",
      ) for _ in range(8)],
     autoreset_mode=AutoresetMode.SAME_STEP,   # see train/core/train.py for why
+    context="spawn",                          # one start method on every OS
 )
 ```
+
+Games that ship a native vector env (dance-off does) also work through
+`gymnasium.make_vec("Lockstep/DanceOff-v0", num_envs=8,
+engine_source="out/engine.wasm")` — same API, N engines on Rust threads
+instead of worker processes, ~35% faster on the reference machine. The
+conformance suite holds it step-for-step identical to the process path.
 
 **The export/stage seam is stable.** `train/core/export.py` and
 `train/core/stage.py` accept ANY torch module that exposes three attributes —
@@ -179,11 +186,16 @@ Progress prints every rollout: episode count, mean return, wall time — and
 at most one rollout (~2 s of work).
 
 Two things make a long run fast, both visible in the startup line
-(`update device: mps   envs: 8`):
+(`update device: mps   envs: 8 (DanceOffVectorEnv)`):
 
-- **Collection is parallel.** `NUM_ENVS` engine instances step in separate
-  worker processes via Gymnasium's standard `AsyncVectorEnv` — the engine is
-  the wall-clock bottleneck, and one env can only pin one core. The default
+- **Collection is parallel — natively when the game supports it.** A game
+  package that registers a native vector env (N engines on Rust threads in
+  this process, GIL released — dance-off does) is picked up automatically;
+  otherwise `NUM_ENVS` engine instances step in separate worker processes
+  via Gymnasium's standard `AsyncVectorEnv`. The games-side conformance
+  suite holds the two paths step-for-step identical, so which one you get
+  changes throughput, never semantics. (Measured on an 8-perf-core laptop
+  at N=8: ~2,640 env-steps/s native vs ~1,930 process-based.) The default
   (`min(8, cores-2)`) leaves headroom for the learner and the OS;
   `NUM_ENVS=1` runs in-process (breakpoints reach the env; useful for
   debugging).

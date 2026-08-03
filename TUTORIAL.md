@@ -177,8 +177,8 @@ before assuming steps alone will get you a scoring agent. Output:
 
 ```
 ── training dance-off [servo-assist] for 1024 steps
-  update device: mps   envs: 8
-     1024/1024 steps  episodes=0    mean_return=     nan     2.4s
+  update device: mps   envs: 8 (DanceOffVectorEnv)
+     1024/1024 steps  episodes=0    mean_return=     nan     2.3s
 → weights: out/policy.pt
 → onnx: out/policy.onnx (1209048 bytes)
 ✓ torch/onnxruntime parity: max abs diff 4.470e-08
@@ -190,10 +190,13 @@ Compete:  task upload
 
 Reading it:
 
-- `update device: mps   envs: 8` — collection steps 8 engine instances in
-  parallel worker processes, and the PPO update pass runs on the best
-  available accelerator (here Apple MPS). Neither changes what trains — the
-  same policy comes out of a CPU-only box, just slower.
+- `envs: 8 (DanceOffVectorEnv)` — collection steps 8 engine instances in
+  parallel. Dance-off ships a NATIVE vector env (engines on Rust threads in
+  this process), so the loop picked it automatically; games without one get
+  the same parallelism from worker processes (`AsyncVectorEnv`), and the
+  update pass runs on the best available accelerator (here Apple MPS)
+  either way. None of it changes what trains — the same policy comes out
+  of a CPU-only box, just slower.
 - `episodes=0`, `mean_return=nan` — 1024 steps across 8 parallel envs is 128
   ticks each, nowhere near a full episode (the routine runs ~2773 ticks), so
   no episode ever finished. Expected for a smoke run.
