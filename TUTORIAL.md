@@ -1,6 +1,9 @@
 # Tutorial: two agents for Dance-Off
 
-A worked example, end to end, with real output. You'll build **two** agents:
+A worked example, end to end, with real output — using **Dance-Off**, the
+shipped reference game. (The template itself is game-agnostic: every command
+below takes `GAME=<slug>` and defaults to dance-off; the flow is identical
+for any installed game package.) You'll build **two** agents:
 
 1. a **non-trained** one — a hand-written policy, no RL, ~30 lines — to see
    what an agent actually *is*;
@@ -81,7 +84,11 @@ sways two joints on a slow sine at even effort:
 
 ```python
 class Sway(nn.Module):
-    action_len = ACTION_LEN  # 48: 36 pose channels + 12 effort shares
+    # The export seam reads these three attributes — that's the whole
+    # interface between "your policy" and the pipeline:
+    action_len = ACTION_LEN                    # 48: 36 pose + 12 effort shares
+    input_names = ["marquee", "agent"]         # the ONNX signature, by name
+    input_shapes = {"marquee": (1, 64, 256), "agent": (62,)}
 
     def forward(self, marquee, agent):
         tick_seconds = agent[:, -1:] / 60.0
@@ -163,16 +170,18 @@ task train STEPS=1024
 ```
 
 `STEPS=1024` is a smoke-test run (a few seconds of training) so you can watch
-the whole pipeline; the default is 8192, and real training wants orders of
-magnitude more. Output:
+the whole pipeline; the default is 8192, and a real run wants orders of
+magnitude more — but read
+[the reward landscape](README.md#the-reward-landscape-read-before-a-long-run)
+before assuming steps alone will get you a scoring agent. Output:
 
 ```
-── training [servo-assist] for 1024 steps
+── training dance-off [servo-assist] for 1024 steps
   update device: mps   envs: 8
-     1024/1024 steps  episodes=0    mean_return=     nan     2.8s
+     1024/1024 steps  episodes=0    mean_return=     nan     2.4s
 → weights: out/policy.pt
-→ onnx: out/policy.onnx (1208780 bytes)
-✓ torch/onnxruntime parity: max abs diff 2.992e-08
+→ onnx: out/policy.onnx (1209048 bytes)
+✓ torch/onnxruntime parity: max abs diff 4.470e-08
 → bundle: out/agent-bundle
 
 Run it:   task match
@@ -188,6 +197,11 @@ Reading it:
 - `episodes=0`, `mean_return=nan` — 1024 steps across 8 parallel envs is 128
   ticks each, nowhere near a full episode (the routine runs ~2773 ticks), so
   no episode ever finished. Expected for a smoke run.
+- Two files the smoke run already produced that matter for real runs:
+  `out/checkpoint.pt` (rewritten atomically every rollout — a crash loses at
+  most one rollout, `task train RESUME=1` continues) and `out/metrics.csv`
+  (one diagnostics row per rollout — see
+  [the README](README.md#watch-a-run-metricscsv) for how to read it).
 - The **parity check** re-runs the exported ONNX under onnxruntime — the
   exact runtime the platform's inference host uses — and compares against
   torch. `3.0e-08` means the export IS the network you trained. A real graph
@@ -211,20 +225,23 @@ task match
 ```
 match finished: 2773 frames, final tick 2772, rankings [0, 1], winner None
 top-score:          0.0
-mean-card-quality:  0.08
-moves-hit:          4
-falls:              11
-mean-posture:       0.86
+mean-card-quality:  0.05
+moves-hit:          2
+falls:              13
+mean-posture:       0.84
 ```
 
-**The 30-second trained agent loses to the sway bot** — 0 points and 11
+**The 30-second trained agent loses to the sway bot** — 0 points and 13
 falls against 137 and none. That is the honest baseline of this template,
-and it's the right lesson to start from: continuous control is hard, a
-policy that hasn't learned to stand yet spends the match on the floor, and
-the sway bot's score is the number your training run has to beat before it
-has learned anything at all. Crank `STEPS` (see
-[Train for real](README.md#train-for-real)) and watch `mean_return` come
-alive.
+and it's the right lesson to start from: continuous control is hard, and a
+policy that hasn't learned to stand yet spends the match on the floor. The
+sway bot's score is the number your training run has to beat before it has
+learned anything at all — and beating it takes more than steps: a real
+2M-step run of this exact loop still ended at score 0 (dance-off pays only
+for hitting cards, and random motion never does). What it takes is YOUR
+work on top of honest machinery — see
+[the reward landscape](README.md#the-reward-landscape-read-before-a-long-run)
+for where to start.
 
 ## Part 3 — reading a match
 
@@ -266,13 +283,23 @@ To sanity-check a bundle without credentials:
 
 ## Where to go from here
 
-- **Beat the sway bot**: `task train STEPS=2000000` and compare metrics.
+- **Beat the sway bot** — the real work. Raw steps demonstrably aren't
+  enough on this reward landscape; the promising directions (reward shaping
+  against the match metrics, curriculum, bigger nets, imitation, your own
+  algorithm) are laid out in
+  [the reward landscape](README.md#the-reward-landscape-read-before-a-long-run).
+  The machinery keeps every attempt cheap: crash-safe checkpoints,
+  comparable `metrics.csv` runs, parity-checked bundles.
+- **Bring your own training stack**: the env is standard Gymnasium (works
+  with SB3 / CleanRL / torchrl out of the box) and the export/stage seam
+  takes any policy that answers the derived signature — see
+  [the README](README.md#bring-your-own-training-stack).
 - **Try the research tier**: `task train MODE=raw-torque` — no servo
   assistance, your policy outputs raw joint torques (action becomes
   `(36,)`). Its own ladder; a bundle targets exactly one tier.
-- **Replace the network**: `train/` is yours. Only the ONNX signature
-  (`marquee`/`agent` → `action`, enforced by `train/export.py`) and the
-  bundle layout are load-bearing — see
+- **Replace the network**: `train/` is yours. Only the derived ONNX
+  signature (obs keys → `action`, enforced by `train/core/export.py`) and
+  the bundle layout are load-bearing — see
   [the contract](README.md#the-contract) and the
   [interface page](https://lockstep.games/games/dance-off/interface?mode=servo-assist)
   for the types.

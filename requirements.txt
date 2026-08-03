@@ -1,10 +1,10 @@
-# The dance-off Gymnasium env — pulls lockstep-train (the platform's
-# game-agnostic wasm-stepping host), gymnasium, and numpy transitively, and
-# carries the prebuilt agent-shell components the bundle needs.
-# >=0.2.0 speaks payload schema v6 (FlatBuffers) — pairs with engine 0.6.0.
-lockstep-game-dance-off>=0.2.0
-
-# Training + export stack (train/ uses these; the env itself does not).
+# Generic training/export stack ONLY — no game packages here. Games install
+# separately (`task setup GAME=<slug>` runs `pip install lockstep-game-<slug>`)
+# and are discovered at runtime through the `lockstep.training_games` entry
+# point; each game wheel pulls lockstep-train (the platform's game-agnostic
+# wasm-stepping host) and carries its own codec + prebuilt agent shells.
+gymnasium>=1.0
+numpy>=1.26
 torch>=2.4
 onnx>=1.16
 onnxruntime>=1.18

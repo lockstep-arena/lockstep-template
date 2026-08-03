@@ -1,6 +1,12 @@
 """train -> export -> parity-check -> stage the submittable agent bundle.
 
-One command (``task train`` runs it). The staged bundle is what the platform
+One command (``task train`` runs it), for ANY installed game::
+
+    python -m train.main --game <slug> --steps 8192 --engine out/engine.wasm
+
+The game is discovered through the ``lockstep.training_games`` entry point —
+``pip install lockstep-game-<slug>`` is all it takes for ``--game <slug>``
+to work; this repo names no game. The staged bundle is what the platform
 actually consumes — and what ``lockstep match run`` / ``lockstep agent
 upload`` take directly::
 
@@ -8,72 +14,47 @@ upload`` take directly::
       lockstep.toml        declares the `policy` artifact by NAME
       component.wasm       the mode's prebuilt agent shell (from the wheel)
       artifacts/policy.onnx
-
-The component is NOT trained here: it is the fixed WASM shell that feeds
-observations to whatever ``policy.onnx`` you put next to it, shipped inside
-the ``lockstep-game-dance-off`` wheel and version-coupled to the observation
-codec the env trains against.
 """
 
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
 import torch
 
-from lockstep_dance_off import MODE_RAW_TORQUE, MODE_SERVO_ASSIST, _native
-from lockstep_dance_off.components import agent_component_path
-
-from .export import export, verify
-from .policy import Policy
-from .train import train
-
-GAME_SLUG = "dance-off"
+from .core.discovery import resolve_game
+from .core.export import export, verify
+from .core.policy import policy_from_signature
+from .core.stage import stage
+from .core.train import default_num_envs, train
 
 OUT_DIR = Path("out")
 BUNDLE_DIR = OUT_DIR / "agent-bundle"
 
 
-def stage(mode: str, onnx: Path, bundle: Path = BUNDLE_DIR) -> Path:
-    """Write the agent bundle for ``mode`` and return its directory.
-
-    ``bundle`` defaults to the trained agent's home; the scripted example
-    stages to its own directory so the two can coexist.
-    """
-    (bundle / "artifacts").mkdir(parents=True, exist_ok=True)
-    (bundle / "artifacts/policy.onnx").write_bytes(onnx.read_bytes())
-    shutil.copyfile(agent_component_path(mode), bundle / "component.wasm")
-    (bundle / "lockstep.toml").write_text(
-        "# Staged by train/main.py — do not hand-edit.\n"
-        "#\n"
-        "# `policy` is the artifact NAME the shell passes to `infer()`.\n"
-        "schema_version = 1\n"
-        f'game = "{GAME_SLUG}"\n'
-        "# Read from the codec, never typed here: the api refuses an agent\n"
-        "# whose declared version does not match the live game catalog.\n"
-        f"payload_schema_version = {_native.PAYLOAD_SCHEMA_VERSION}\n"
-        "# The ladder this agent targets (dance-off has more than one mode).\n"
-        f'mode = "{mode}"\n'
-        "\n"
-        "[artifacts.policy]\n"
-        'kind = "onnx"\n'
-        'path = "artifacts/policy.onnx"\n'
-    )
-    return bundle
-
-
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--mode", choices=[MODE_SERVO_ASSIST, MODE_RAW_TORQUE], required=True)
+    p.add_argument(
+        "--game",
+        default=None,
+        help="game slug; the matching lockstep-game-<slug> package must be "
+        "installed (task setup GAME=<slug>). Defaults to the one installed "
+        "game when there is exactly one.",
+    )
+    p.add_argument(
+        "--mode",
+        default=None,
+        help="game mode key; defaults to the game's default mode",
+    )
     p.add_argument(
         "--steps",
         type=int,
         default=8192,
         help="environment steps. The default is a SHORT run: it produces a real "
-        "policy, not a good one. Raise it by orders of magnitude to train.",
+        "policy, not a good one — and on sparse rewards, steps alone will not "
+        "either (see the README's reward-landscape section).",
     )
     p.add_argument("--time-limit-ticks", type=int, default=1800)
     p.add_argument("--seed", type=int, default=0)
@@ -81,6 +62,12 @@ def main() -> None:
         "--engine",
         required=True,
         help="engine wasm: a local path (task engine downloads one) or an https URL",
+    )
+    p.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue a crashed/stopped run from out/checkpoint.pt (written "
+        "every rollout) up to --steps",
     )
     p.add_argument(
         "--from-weights",
@@ -95,31 +82,51 @@ def main() -> None:
     p.add_argument(
         "--num-envs",
         type=int,
-        default=8,
-        help="parallel engine instances for collection; 1 = in-process (debuggable)",
+        default=None,
+        help="parallel engine instances for collection; 1 = in-process "
+        f"(debuggable). Default: min(8, cores-2) = {default_num_envs()} here",
     )
     args = p.parse_args()
+
+    spec, spec_module = resolve_game(args.game)
+    mode = args.mode or spec["default_mode"]
+    if mode not in spec["modes"]:
+        raise SystemExit(
+            f"game {spec['slug']!r} has no mode {mode!r} "
+            f"(modes: {', '.join(sorted(spec['modes']))})"
+        )
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     if args.from_weights:
         print(f"── loading weights {args.from_weights}")
-        blob = torch.load(args.from_weights, weights_only=True)
-        net = Policy(blob["action_len"])
+        blob = torch.load(args.from_weights, weights_only=True, map_location="cpu")
+        net = policy_from_signature(blob["spaces"])
         net.load_state_dict(blob["state_dict"])
     else:
-        print(f"── training [{args.mode}] for {args.steps} steps")
+        print(f"── training {spec['slug']} [{mode}] for {args.steps} steps")
         net = train(
-            mode=args.mode,
+            spec=spec,
+            spec_module=spec_module,
+            mode=mode,
             steps=args.steps,
             engine=args.engine,
             time_limit_ticks=args.time_limit_ticks,
             num_envs=args.num_envs,
             seed=args.seed,
             device=args.device,
+            out_dir=OUT_DIR,
+            resume=args.resume,
         )
         weights = OUT_DIR / "policy.pt"
-        torch.save({"action_len": net.action_len, "state_dict": net.state_dict()}, weights)
+        torch.save(
+            {
+                "action_len": net.action_len,
+                "spaces": net.space_signature(),
+                "state_dict": net.state_dict(),
+            },
+            weights,
+        )
         print(f"→ weights: {weights}")
 
     onnx = export(net, OUT_DIR / "policy.onnx")
@@ -128,7 +135,7 @@ def main() -> None:
     diff = verify(net, onnx)
     print(f"✓ torch/onnxruntime parity: max abs diff {diff:.3e}")
 
-    bundle = stage(args.mode, onnx)
+    bundle = stage(spec, mode, onnx, BUNDLE_DIR)
     print(f"→ bundle: {bundle}")
     print("\nRun it:   task match\nCompete:  task upload")
 

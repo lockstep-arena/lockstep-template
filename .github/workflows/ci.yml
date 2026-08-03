@@ -1,0 +1,91 @@
+# Proves the whole pipeline on every OS researchers actually use.
+#
+# dance-off is CI's named test fixture — the one place outside docs/examples
+# where a game may be named. The template itself discovers games at runtime;
+# CI just has to install SOME game to train one.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pipeline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install CPU torch (Linux)
+        # The default Linux torch wheel drags the full CUDA stack (~2.5 GB)
+        # onto a runner with no GPU; the cpu index has the same version slim.
+        if: runner.os == 'Linux'
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install the training stack
+        run: |
+          pip install -r requirements.txt
+          pip install "lockstep-game-dance-off>=0.3" pytest
+
+      - name: Fetch the game's pinned engine
+        run: python -m train.core.engine --game dance-off --out out/engine.wasm
+
+      - name: Template tests (import lint + SAME_STEP autoreset semantics)
+        run: python -m pytest tests -q
+
+      - name: Train through the full pipeline (vectorized, spawn workers)
+        run: |
+          python -m train.main --game dance-off --steps 256 --num-envs 2 \
+            --time-limit-ticks 120 --engine out/engine.wasm
+
+      - name: Resume from the rollout checkpoint
+        run: |
+          test -f out/checkpoint.pt
+          python -m train.main --game dance-off --steps 384 --num-envs 2 \
+            --time-limit-ticks 120 --engine out/engine.wasm --resume
+
+      - name: Staged bundle + metrics exist
+        run: |
+          test -f out/agent-bundle/lockstep.toml
+          test -f out/agent-bundle/component.wasm
+          test -f out/agent-bundle/artifacts/policy.onnx
+          test -f out/metrics.csv
+          head -2 out/metrics.csv
+
+      - name: Derived ONNX signature matches the frozen fixture
+        # The platform's inference host binds tensors by NAME — the derived
+        # signature must reproduce the shipped contract exactly.
+        run: |
+          python - <<'EOF'
+          import json, onnx
+          m = onnx.load("out/policy.onnx")
+          def sig(vs):
+              return [
+                  {
+                      "name": v.name,
+                      "dtype": onnx.TensorProto.DataType.Name(v.type.tensor_type.elem_type),
+                      "shape": [d.dim_value for d in v.type.tensor_type.shape.dim],
+                  }
+                  for v in vs
+              ]
+          got = {"inputs": sig(m.graph.input), "outputs": sig(m.graph.output)}
+          want = json.load(open(".github/fixtures/dance-off-onnx-signature.json"))
+          def by_name(entries):
+              return {e["name"]: (e["dtype"], list(e["shape"])) for e in entries}
+          assert by_name(got["inputs"]) == by_name(want["inputs"]), (got, want)
+          assert by_name(got["outputs"]) == by_name(want["outputs"]), (got, want)
+          print("signature OK:", by_name(got["inputs"]), "->", by_name(got["outputs"]))
+          EOF

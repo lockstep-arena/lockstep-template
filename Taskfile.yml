@@ -1,5 +1,11 @@
 # The template's entire surface. Every task uses the repo-local .venv
 # explicitly — no shell activation, no global installs.
+#
+# GAME=<slug> parameterizes everything: `task setup GAME=x` installs
+# lockstep-game-x, and every other task discovers the installed game through
+# its training-metadata entry point (no game-specific config lives here —
+# the engine URL pin, mode list, etc. all come from the game package).
+# dance-off is only the DEFAULT, as the shipped reference game.
 version: "3"
 
 dotenv: [".env"]
@@ -7,41 +13,38 @@ dotenv: [".env"]
 vars:
   VENV: "{{.ROOT_DIR}}/.venv"
   PY: "{{.VENV}}/bin/python"
-  # The engine you train against and play with: a REAL published dance-off
-  # release from the public CDN, pinned so training and matches are
-  # reproducible. Newer releases appear under .../games/dance-off/releases/.
-  # 0.6.x = payload schema v6 (FlatBuffers agent surface) — requires
-  # lockstep-game-dance-off >= 0.2.0 (see requirements.txt). The release's
-  # contract.fbs sits next to the engine (task contract pulls it from there).
-  ENGINE_URL: "https://cdn.lockstep.mediabucket.io/games/dance-off/releases/0.6.1/servo-assist/engine.wasm"
+  GAME: '{{.GAME | default "dance-off"}}'
 
 tasks:
   setup:
-    desc: "Create .venv and install the training stack (gym env + torch + onnx)."
+    desc: "Create .venv and install the training stack + the game package. GAME=dance-off"
     cmds:
       - python3 -m venv "{{.VENV}}"
       - '"{{.VENV}}/bin/pip" install --upgrade pip'
       - '"{{.VENV}}/bin/pip" install -r requirements.txt'
+      - '"{{.VENV}}/bin/pip" install "lockstep-game-{{.GAME}}"'
       - 'echo "✓ setup complete — next: task train"'
 
   engine:
-    desc: "Download the pinned engine wasm (no-op if already present)."
-    status:
-      - test -f out/engine.wasm
+    desc: "Download the game's pinned engine wasm (no-op if unchanged). GAME= MODE="
     cmds:
-      - mkdir -p out
-      - curl -fsSL "{{.ENGINE_URL}}" -o out/engine.wasm
-      - echo "→ out/engine.wasm"
+      # The URL comes from the game package's spec (it pins the release its
+      # codec was built against); the helper stamps out/engine.wasm.url so
+      # switching GAME/MODE re-downloads and re-runs are no-ops.
+      - '"{{.PY}}" -m train.core.engine --game "{{.GAME}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} --out out/engine.wasm'
 
   train:
-    desc: "PPO → ONNX → parity check → stage out/agent-bundle. STEPS=8192 MODE=servo-assist NUM_ENVS=8"
+    desc: "PPO → ONNX → parity check → stage out/agent-bundle. GAME= MODE= STEPS=8192 NUM_ENVS=(cores-2, max 8) RESUME=1 to continue a crashed run"
     deps: [engine]
     vars:
       STEPS: '{{.STEPS | default "8192"}}'
-      MODE: '{{.MODE | default "servo-assist"}}'
-      NUM_ENVS: '{{.NUM_ENVS | default "8"}}'
     cmds:
-      - '"{{.PY}}" -m train.main --mode "{{.MODE}}" --steps {{.STEPS}} --num-envs {{.NUM_ENVS}} --engine out/engine.wasm'
+      - >-
+        "{{.PY}}" -m train.main --game "{{.GAME}}" --steps {{.STEPS}}
+        {{if .MODE}}--mode "{{.MODE}}"{{end}}
+        {{if .NUM_ENVS}}--num-envs {{.NUM_ENVS}}{{end}}
+        {{if .RESUME}}--resume{{end}}
+        --engine out/engine.wasm
 
   scripted:
     desc: "Build the NON-trained example agent (examples/scripted_agent.py) → out/scripted-bundle."
@@ -49,14 +52,15 @@ tasks:
       - '"{{.PY}}" -m examples.scripted_agent'
 
   contract:
-    desc: "Refresh the vendored dance-off.fbs from the CDN release ENGINE_URL pins (the agent WIT is vendored in this repo and updated with it)."
+    desc: "Refresh the vendored dance-off.fbs from the CDN release the game package pins (the agent WIT is vendored in this repo and updated with it)."
     cmds:
       - |
         set -e
         # The contract is published NEXT TO the engine wasm of every release,
         # so the refresh is always the contract of the exact engine you train
         # against — same directory, same version, no credentials needed.
-        CONTRACT_URL="$(dirname "{{.ENGINE_URL}}")/contract.fbs"
+        ENGINE_URL="$("{{.PY}}" -m train.core.engine --game "{{.GAME}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} --print-url)"
+        CONTRACT_URL="$(dirname "$ENGINE_URL")/contract.fbs"
         curl -fsSL "$CONTRACT_URL" -o examples/rust-agent/contract/dance-off.fbs
         echo "→ refreshed examples/rust-agent/contract/dance-off.fbs"
         echo "  from $CONTRACT_URL"
@@ -71,7 +75,7 @@ tasks:
       - 'echo "Run it:  task match BUNDLE=examples/rust-agent/target/wasm32-wasip2/release/rust_agent.wasm"'
 
   match:
-    desc: "Run a real local match with a bundle in both seats. BUNDLE=out/agent-bundle"
+    desc: "Run a real local match with a bundle in both seats. GAME= BUNDLE=out/agent-bundle"
     deps: [engine]
     vars:
       BUNDLE: '{{.BUNDLE | default "out/agent-bundle"}}'
@@ -82,7 +86,7 @@ tasks:
         msg: "nothing at {{.BUNDLE}} — `task train`, `task scripted`, or `task rust-agent` first"
     cmds:
       - |
-        lockstep match run --slug dance-off \
+        lockstep match run --slug "{{.GAME}}" \
           --engine out/engine.wasm \
           --agents {{.BUNDLE}} {{.BUNDLE}} \
           --seed-hex 0703 \
@@ -90,7 +94,7 @@ tasks:
       - echo "✓ match archived → out/archive.bin"
 
   upload:
-    desc: "Upload the bundle to compete. Needs LOCKSTEP_API_KEY in .env. AGENT_ID=<id> for a revision."
+    desc: "Upload the bundle to compete. Needs LOCKSTEP_API_KEY in .env. GAME= NAME=my-agent AGENT_ID=<id> for a revision."
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.games/install.sh | sh"
@@ -99,7 +103,7 @@ tasks:
       - sh: test -n "${LOCKSTEP_API_KEY:-}"
         msg: "LOCKSTEP_API_KEY not set — copy .env.example to .env and fill it in"
     vars:
-      NAME: '{{.NAME | default "my-dancer"}}'
+      NAME: '{{.NAME | default "my-agent"}}'
     cmds:
       - |
         set -e
@@ -107,5 +111,12 @@ tasks:
           lockstep agent upload --bundle out/agent-bundle --agent-id "{{.AGENT_ID}}"
         else
           lockstep agent upload --bundle out/agent-bundle \
-            --display-name "{{.NAME}}" --game-id dance-off
+            --display-name "{{.NAME}}" --game-id "{{.GAME}}"
         fi
+
+  test:
+    desc: "Run the template's own tests (import-lint + vec-env semantics; needs setup + engine)."
+    deps: [engine]
+    cmds:
+      - '"{{.VENV}}/bin/pip" install --quiet pytest'
+      - '"{{.PY}}" -m pytest tests -q'
