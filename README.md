@@ -69,7 +69,7 @@ hand-written no-training agent — with real captured output.
 |---|---|
 | `task setup` | Creates `.venv` and installs `requirements.txt` (the dance-off Gymnasium env, torch, onnx toolchain). |
 | `task engine` | Downloads the pinned engine wasm to `out/engine.wasm` (automatic before train/match; no-op if present). |
-| `task train` | PPO against the real engine → ONNX export → torch/onnxruntime parity check → stages `out/agent-bundle/`. Vars: `STEPS` (default 8192), `MODE` (default `servo-assist`). |
+| `task train` | PPO against the real engine → ONNX export → torch/onnxruntime parity check → stages `out/agent-bundle/`. Vars: `STEPS` (default 8192), `MODE` (default `servo-assist`), `NUM_ENVS` (default 8 parallel engine instances). |
 | `task scripted` | Builds the NON-trained example agent ([`examples/scripted_agent.py`](examples/scripted_agent.py)) → `out/scripted-bundle/`. No RL involved. |
 | `task match` | `lockstep match run` with a bundle in both seats (self-play); writes `out/archive.bin`. Var: `BUNDLE` — a bundle dir (`out/agent-bundle`, `out/scripted-bundle`) or a bare `.wasm` component (the Rust agent). |
 | `task rust-agent` | Builds [`examples/rust-agent/`](examples/rust-agent/) — an agent authored directly in Rust → wasm component, from public contracts only. Needs `rustup target add wasm32-wasip2`. |
@@ -87,16 +87,24 @@ dancer. Real training is orders of magnitude longer:
 task train STEPS=2000000
 ```
 
-Progress prints every rollout (512 steps): episode count, mean return, wall
-time. Weights land in `out/policy.pt`, so a crashed run's last export can be
-recovered (see the next recipe).
+Progress prints every rollout (1024 steps: 8 envs × 128): episode count, mean
+return, wall time. Weights land in `out/policy.pt`, so a crashed run's last
+export can be recovered (see the next recipe).
 
-The PPO update pass — the dominant cost of a long run — automatically runs on
-the best available accelerator (CUDA, then Apple MPS, then CPU); the run
-prints `update device:` at startup. Rollout collection deliberately stays on
-CPU, where batch-1 inference through a net this small beats a GPU's per-op
-dispatch overhead. Pass `--device cpu`/`cuda`/`mps` to `train.main` to
-override.
+Two things make a long run fast, both visible in the startup line
+(`update device: mps   envs: 8`):
+
+- **Collection is parallel.** `NUM_ENVS` engine instances step in separate
+  worker processes via Gymnasium's standard `AsyncVectorEnv` — the engine is
+  the wall-clock bottleneck, and one env can only pin one core. `NUM_ENVS=1`
+  runs in-process (breakpoints reach the env; useful for debugging). This is
+  also the compatibility statement: the env composes with the vector API that
+  stable-baselines3, CleanRL, and friends build on, so bringing your own
+  training stack needs nothing from this repo.
+- **The PPO update pass runs on the best available accelerator** (CUDA, then
+  Apple MPS, then CPU); `--device cpu`/`cuda`/`mps` overrides. Rollout
+  inference deliberately stays on CPU, where small batches through a net this
+  small beat a GPU's per-op dispatch overhead.
 
 ### Train the research tier (raw-torque)
 

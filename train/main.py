@@ -92,6 +92,12 @@ def main() -> None:
         default=None,
         help="update-pass device (cuda/mps/cpu); default: best available",
     )
+    p.add_argument(
+        "--num-envs",
+        type=int,
+        default=8,
+        help="parallel engine instances for collection; 1 = in-process (debuggable)",
+    )
     args = p.parse_args()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -108,6 +114,7 @@ def main() -> None:
             steps=args.steps,
             engine=args.engine,
             time_limit_ticks=args.time_limit_ticks,
+            num_envs=args.num_envs,
             seed=args.seed,
             device=args.device,
         )
