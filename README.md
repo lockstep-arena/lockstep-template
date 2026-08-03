@@ -91,6 +91,13 @@ Progress prints every rollout (512 steps): episode count, mean return, wall
 time. Weights land in `out/policy.pt`, so a crashed run's last export can be
 recovered (see the next recipe).
 
+The PPO update pass — the dominant cost of a long run — automatically runs on
+the best available accelerator (CUDA, then Apple MPS, then CPU); the run
+prints `update device:` at startup. Rollout collection deliberately stays on
+CPU, where batch-1 inference through a net this small beats a GPU's per-op
+dispatch overhead. Pass `--device cpu`/`cuda`/`mps` to `train.main` to
+override.
+
 ### Train the research tier (raw-torque)
 
 `servo-assist` (default) asks your policy for target poses the engine's servo

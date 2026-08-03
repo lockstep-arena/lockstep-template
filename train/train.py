@@ -27,6 +27,20 @@ from lockstep_dance_off import MODE_RAW_TORQUE, MODE_SERVO_ASSIST
 from .policy import Policy
 
 
+def pick_device() -> torch.device:
+    """Best available device for the PPO update pass.
+
+    Only the update runs there: batch-1 rollout inference is faster on CPU
+    than on MPS/CUDA (per-op dispatch overhead dominates a net this small),
+    so collection stays on CPU regardless.
+    """
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 def make_env(mode: str, engine: str | None, time_limit_ticks: int | None):
     return gymnasium.make(
         "Lockstep/DanceOff-v0",
@@ -80,12 +94,26 @@ def train(
     clip: float = 0.2,
     entropy_coef: float = 0.005,
     seed: int = 0,
+    device: str | None = None,
 ) -> Policy:
     torch.manual_seed(seed)
     env = make_env(mode, engine, time_limit_ticks)
     (action_len,) = env.action_space.shape
     net = Policy(action_len)
-    opt = torch.optim.Adam(net.parameters(), lr=lr)
+
+    dev = torch.device(device) if device else pick_device()
+    if dev.type == "cuda":
+        # Every conv sees the same shapes all run, the case autotune exists for.
+        torch.backends.cudnn.benchmark = True
+    if dev.type == "cpu":
+        learner = net
+    else:
+        # `net` stays the CPU rollout copy; `learner` takes the gradient
+        # steps on the accelerator and syncs weights back each rollout.
+        learner = Policy(action_len).to(dev)
+        learner.load_state_dict(net.state_dict())
+    print(f"  update device: {dev}", flush=True)
+    opt = torch.optim.Adam(learner.parameters(), lr=lr)
 
     obs, _ = env.reset(seed=seed)
     episode_return, episode_returns = 0.0, []
@@ -131,18 +159,18 @@ def train(
         # Normalizing advantages is what keeps the update scale sane when the
         # reward is a raw score delta that can sit at zero for long stretches
         # (a dancer who is not hitting cards earns nothing at all).
-        adv_t = torch.from_numpy(advantages)
+        adv_t = torch.from_numpy(advantages).to(dev)
         adv_t = (adv_t - adv_t.mean()) / (adv_t.std() + 1e-8)
 
-        marquee_t = torch.cat(buf_marquee)
-        agent_t = torch.cat(buf_agent)
-        raw_t = torch.cat(buf_raw)
-        logp_t = torch.cat(buf_logp)
-        ret_t = torch.from_numpy(returns)
+        marquee_t = torch.cat(buf_marquee).to(dev)
+        agent_t = torch.cat(buf_agent).to(dev)
+        raw_t = torch.cat(buf_raw).to(dev)
+        logp_t = torch.cat(buf_logp).to(dev)
+        ret_t = torch.from_numpy(returns).to(dev)
 
         for _ in range(epochs):
             for idx in torch.randperm(len(buf_rew)).split(minibatch):
-                new_logp, entropy, value = net.evaluate(
+                new_logp, entropy, value = learner.evaluate(
                     marquee_t[idx], agent_t[idx], raw_t[idx]
                 )
                 ratio = (new_logp - logp_t[idx]).exp()
@@ -155,8 +183,11 @@ def train(
                 loss.backward()
                 # PPO without gradient clipping diverges readily on a reward
                 # this spiky; cheap insurance.
-                torch.nn.utils.clip_grad_norm_(net.parameters(), 0.5)
+                torch.nn.utils.clip_grad_norm_(learner.parameters(), 0.5)
                 opt.step()
+
+        if learner is not net:
+            net.load_state_dict(learner.state_dict())
 
         recent = episode_returns[-5:]
         mean_return = sum(recent) / len(recent) if recent else float("nan")
@@ -185,6 +216,11 @@ def main() -> None:
     )
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", default=None, help="write the trained .pt here")
+    p.add_argument(
+        "--device",
+        default=None,
+        help="update-pass device (cuda/mps/cpu); default: best available",
+    )
     args = p.parse_args()
 
     net = train(
@@ -193,6 +229,7 @@ def main() -> None:
         engine=args.engine,
         time_limit_ticks=args.time_limit_ticks,
         seed=args.seed,
+        device=args.device,
     )
     if args.out:
         torch.save({"action_len": net.action_len, "state_dict": net.state_dict()}, args.out)
