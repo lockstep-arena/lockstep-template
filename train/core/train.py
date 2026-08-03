@@ -119,11 +119,21 @@ def make_vec_env(
     time_limit_ticks: int | None,
     num_envs: int,
 ):
-    """``num_envs`` engines stepping in parallel, one per worker process.
+    """``num_envs`` engines stepping in parallel.
 
-    ``num_envs=1`` uses the in-process ``SyncVectorEnv`` — same API, no
-    subprocesses — which is the one to debug under (breakpoints reach the
-    env).
+    Three paths, best available first:
+
+    - A game that registers a NATIVE vector env (``vector_entry_point`` —
+      N engines on Rust threads in THIS process, GIL released) gets it by
+      default: no worker processes, no per-step IPC, fastest on every OS.
+      The games-side conformance suite holds it step-for-step identical to
+      the process path, so this is a throughput choice, never a semantics
+      one.
+    - Otherwise ``AsyncVectorEnv``, one worker process per env — the
+      portable standard-API path every game supports.
+    - ``num_envs=1`` uses the in-process ``SyncVectorEnv`` — same API, no
+      parallelism — which is the one to debug under (breakpoints reach the
+      env).
 
     SAME_STEP autoreset is load-bearing, not taste: with it, every
     transition the loop stores is one the env actually executed (the obs
@@ -132,12 +142,35 @@ def make_vec_env(
     — the action is ignored — and a loop that doesn't mask that step out
     trains on a transition that never happened.
 
-    Workers use the SPAWN start method explicitly, on every OS. Linux is the
-    one platform whose default is fork, and forking a process that already
-    imported torch (thread pools, allocator locks) deadlocks the workers —
-    it hung CI's Linux leg while macOS/Windows sailed through. One start
-    method everywhere is the whole point: no OS-specific behavior to debug.
+    Async workers use the SPAWN start method explicitly, on every OS. Linux
+    is the one platform whose default is fork, and forking a process that
+    already imported torch (thread pools, allocator locks) deadlocks the
+    workers — it hung CI's Linux leg while macOS/Windows sailed through.
+    One start method everywhere is the whole point: no OS-specific behavior
+    to debug.
     """
+    if num_envs > 1:
+        importlib.import_module(spec_module)  # registration side effect
+        import gymnasium
+
+        spec = gymnasium.registry.get(env_id)
+        if spec is not None and spec.vector_entry_point is not None:
+            env = gymnasium.make_vec(
+                env_id,
+                num_envs=num_envs,
+                vectorization_mode="vector_entry_point",
+                mode=mode,
+                engine_source=engine,
+                time_limit_ticks=time_limit_ticks,
+            )
+            if env.metadata.get("autoreset_mode") is not AutoresetMode.SAME_STEP:
+                raise RuntimeError(
+                    f"{env_id} native vector env declares "
+                    f"{env.metadata.get('autoreset_mode')!r}; the loop "
+                    "requires SAME_STEP autoreset semantics"
+                )
+            return env
+
     fns = [
         make_env_factory(spec_module, env_id, mode, engine, time_limit_ticks)
         for _ in range(num_envs)
@@ -256,7 +289,10 @@ def train(
         opt.load_state_dict(blob["optimizer_state"])
         collected = int(blob["collected"])
         print(f"  resumed at {collected} steps from {checkpoint_path}", flush=True)
-    print(f"  update device: {dev}   envs: {num_envs}", flush=True)
+    print(
+        f"  update device: {dev}   envs: {num_envs} ({type(env).__name__})",
+        flush=True,
+    )
 
     metrics_file = open(  # noqa: SIM115 — held across the whole run
         metrics_path, "a" if resume and metrics_path.is_file() else "w", newline=""

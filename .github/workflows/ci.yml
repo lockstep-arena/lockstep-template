@@ -38,7 +38,7 @@ jobs:
       - name: Install the training stack
         run: |
           pip install -r requirements.txt
-          pip install "lockstep-game-dance-off>=0.3" pytest
+          pip install "lockstep-game-dance-off>=0.4" pytest
 
       - name: Fetch the game's pinned engine
         run: python -m train.core.engine --game dance-off --out out/engine.wasm
