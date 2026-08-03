@@ -2,8 +2,9 @@
 //! NO private dependencies.
 //!
 //! Everything it consumes is public: the `lockstep:agent` WIT world
-//! (vendored under `wit/`, canonical in the lockstep-interface repo) and the
-//! FlatBuffers wire contract (`contract/dance-off.fbs`, same repo). Compare
+//! (vendored under `wit/`) and the FlatBuffers wire contract
+//! (`contract/dance-off.fbs`, published with every engine release as
+//! `contract.fbs` on the CDN — `task contract` refreshes it). Compare
 //! `examples/scripted_agent.py` — this is the same dumb policy, but instead
 //! of riding the prebuilt ONNX shell it IS the component: bytes in, bytes
 //! out, no inference host involved.

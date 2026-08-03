@@ -1,9 +1,9 @@
 # A dance-off agent in pure Rust → wasm32-wasip2, built from PUBLIC
-# artifacts only: the agent WIT world (vendored under wit/, canonical in
-# github.com/lockstep-arena/lockstep-interface) and the FlatBuffers wire
-# contract (contract/dance-off.fbs, same repo — `task contract` refreshes
-# both). src/wire.rs is planus-generated from the .fbs and committed, so a
-# plain `cargo build` needs no extra tools.
+# artifacts only: the agent WIT world (vendored under wit/) and the
+# FlatBuffers wire contract (contract/dance-off.fbs, published next to every
+# engine release as contract.fbs on the CDN — `task contract` refreshes it).
+# src/wire.rs is planus-generated from the .fbs and committed, so a plain
+# `cargo build` needs no extra tools.
 [package]
 name = "rust-agent"
 version = "0.1.0"
