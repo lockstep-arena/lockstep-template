@@ -18,6 +18,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
+from . import utf8_output
 from .discovery import resolve_game
 
 
@@ -51,6 +52,7 @@ def fetch(url: str, out: Path) -> bool:
 
 
 def main() -> None:
+    utf8_output()
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--game", default=None, help="defaults to the one installed game")
     p.add_argument("--mode", default=None, help="defaults to the game's default mode")

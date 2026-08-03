@@ -30,6 +30,7 @@ import torch.nn as nn
 
 from lockstep_dance_off import ACTION_LEN, AGENT_LEN, MARQUEE_SHAPE, MODE_SERVO_ASSIST
 
+from train.core import utf8_output
 from train.core.discovery import load_game
 from train.core.export import export, verify
 from train.core.stage import stage
@@ -69,6 +70,7 @@ class Sway(nn.Module):
 
 
 def main() -> None:
+    utf8_output()
     spec, _module = load_game("dance-off")
     net = Sway()
     onnx = export(net, BUNDLE.parent / "scripted-policy.onnx")

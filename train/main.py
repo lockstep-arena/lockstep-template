@@ -24,6 +24,7 @@ from pathlib import Path
 
 import torch
 
+from .core import utf8_output
 from .core.discovery import resolve_game
 from .core.export import export, verify
 from .core.policy import policy_from_signature
@@ -35,6 +36,7 @@ BUNDLE_DIR = OUT_DIR / "agent-bundle"
 
 
 def main() -> None:
+    utf8_output()
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
         "--game",
