@@ -34,13 +34,14 @@ tasks:
       - echo "→ out/engine.wasm"
 
   train:
-    desc: "PPO → ONNX → parity check → stage out/agent-bundle. STEPS=8192 MODE=servo-assist"
+    desc: "PPO → ONNX → parity check → stage out/agent-bundle. STEPS=8192 MODE=servo-assist NUM_ENVS=8"
     deps: [engine]
     vars:
       STEPS: '{{.STEPS | default "8192"}}'
       MODE: '{{.MODE | default "servo-assist"}}'
+      NUM_ENVS: '{{.NUM_ENVS | default "8"}}'
     cmds:
-      - '"{{.PY}}" -m train.main --mode "{{.MODE}}" --steps {{.STEPS}} --engine out/engine.wasm'
+      - '"{{.PY}}" -m train.main --mode "{{.MODE}}" --steps {{.STEPS}} --num-envs {{.NUM_ENVS}} --engine out/engine.wasm'
 
   scripted:
     desc: "Build the NON-trained example agent (examples/scripted_agent.py) → out/scripted-bundle."

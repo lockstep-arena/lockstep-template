@@ -10,6 +10,13 @@ the exported ONNX worth shipping as a test agent.
 Kept deliberately small (one file, no RL framework) because the alternative was
 a stable-baselines3 dependency for a loop this size, and the interesting part of
 this repo is the train -> export -> bundle -> compete path, not the optimizer.
+
+Collection is vectorized: ``num_envs`` engine instances step in parallel
+worker processes (the standard Gymnasium ``AsyncVectorEnv``), which is both
+the speed story — the engine is the wall-clock bottleneck, and one env pins
+one core — and the compatibility story: the env composes with the vector API
+every mainstream RL stack builds on, so swapping this loop for your own
+framework needs nothing from us.
 """
 
 from __future__ import annotations
@@ -21,10 +28,25 @@ import numpy as np
 import torch
 
 import gymnasium  # noqa: F401  (registers the env)
+from gymnasium.vector import AsyncVectorEnv, AutoresetMode, SyncVectorEnv
 import lockstep_dance_off  # noqa: F401
 from lockstep_dance_off import MODE_RAW_TORQUE, MODE_SERVO_ASSIST
 
 from .policy import Policy
+
+
+def pick_device() -> torch.device:
+    """Best available device for the PPO update pass.
+
+    Only the update runs there: small-batch rollout inference is faster on CPU
+    than on MPS/CUDA (per-op dispatch overhead dominates a net this small),
+    so collection stays on CPU regardless.
+    """
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 def make_env(mode: str, engine: str | None, time_limit_ticks: int | None):
@@ -36,8 +58,30 @@ def make_env(mode: str, engine: str | None, time_limit_ticks: int | None):
     )
 
 
+def make_vec_env(
+    mode: str, engine: str | None, time_limit_ticks: int | None, num_envs: int
+):
+    """``num_envs`` engines stepping in parallel, one per worker process.
+
+    ``num_envs=1`` uses the in-process ``SyncVectorEnv`` — same API, no
+    subprocesses — which is the one to debug under (breakpoints reach the env).
+
+    SAME_STEP autoreset is load-bearing, not taste: with it, every transition
+    the loop stores is one the env actually executed (the obs arriving with
+    ``done=True`` is already the next episode's reset obs). The default
+    NEXT_STEP mode instead burns the following step on the reset — the action
+    is ignored — and a loop that doesn't mask that step out trains on a
+    transition that never happened.
+    """
+    fns = [
+        (lambda: make_env(mode, engine, time_limit_ticks)) for _ in range(num_envs)
+    ]
+    cls = SyncVectorEnv if num_envs == 1 else AsyncVectorEnv
+    return cls(fns, autoreset_mode=AutoresetMode.SAME_STEP)
+
+
 def as_tensors(obs) -> tuple[torch.Tensor, torch.Tensor]:
-    """Gymnasium observation -> the network's two inputs.
+    """Batched vector-env observation -> the network's two inputs.
 
     The marquee is scaled to 0..1 HERE, matching
     ``schema::policy::marquee_normalized`` exactly — the observation space is
@@ -47,23 +91,28 @@ def as_tensors(obs) -> tuple[torch.Tensor, torch.Tensor]:
     encoder and needs nothing.
     """
     marquee = torch.from_numpy(obs["marquee"].astype(np.float32) / 255.0)
-    marquee = marquee.permute(2, 0, 1).unsqueeze(0)  # HWC -> NCHW
-    agent = torch.from_numpy(np.asarray(obs["agent"], dtype=np.float32)).unsqueeze(0)
+    marquee = marquee.permute(0, 3, 1, 2)  # NHWC -> NCHW
+    agent = torch.from_numpy(np.asarray(obs["agent"], dtype=np.float32))
     return marquee, agent
 
 
 def discounted_advantages(rewards, values, dones, last_value, gamma, lam):
-    """Generalized Advantage Estimation over one rollout."""
-    advantages = np.zeros(len(rewards), dtype=np.float32)
-    running = 0.0
+    """Generalized Advantage Estimation over one ``[T, N]`` rollout.
+
+    Envs never mix: each column carries its own recursion, cut wherever that
+    env's episode ended. ``done`` zeroes the bootstrap for truncations too —
+    the same simplification the single-env loop made.
+    """
+    advantages = np.zeros_like(rewards)
+    running = np.zeros(rewards.shape[1], dtype=np.float32)
     next_value = last_value
     for t in reversed(range(len(rewards))):
-        non_terminal = 0.0 if dones[t] else 1.0
+        non_terminal = 1.0 - dones[t]
         delta = rewards[t] + gamma * next_value * non_terminal - values[t]
         running = delta + gamma * lam * non_terminal * running
         advantages[t] = running
         next_value = values[t]
-    return advantages, advantages + np.asarray(values, dtype=np.float32)
+    return advantages, advantages + values
 
 
 def train(
@@ -71,59 +120,76 @@ def train(
     steps: int,
     engine: str | None = None,
     time_limit_ticks: int | None = None,
-    rollout: int = 512,
+    num_envs: int = 8,
+    rollout: int = 128,
     epochs: int = 4,
-    minibatch: int = 128,
+    minibatch: int = 256,
     lr: float = 3e-4,
     gamma: float = 0.99,
     lam: float = 0.95,
     clip: float = 0.2,
     entropy_coef: float = 0.005,
     seed: int = 0,
+    device: str | None = None,
 ) -> Policy:
     torch.manual_seed(seed)
-    env = make_env(mode, engine, time_limit_ticks)
-    (action_len,) = env.action_space.shape
+    env = make_vec_env(mode, engine, time_limit_ticks, num_envs)
+    (action_len,) = env.single_action_space.shape
     net = Policy(action_len)
-    opt = torch.optim.Adam(net.parameters(), lr=lr)
 
-    obs, _ = env.reset(seed=seed)
-    episode_return, episode_returns = 0.0, []
+    dev = torch.device(device) if device else pick_device()
+    if dev.type == "cuda":
+        # Every conv sees the same shapes all run, the case autotune exists for.
+        torch.backends.cudnn.benchmark = True
+    if dev.type == "cpu":
+        learner = net
+    else:
+        # `net` stays the CPU rollout copy; `learner` takes the gradient
+        # steps on the accelerator and syncs weights back each rollout.
+        learner = Policy(action_len).to(dev)
+        learner.load_state_dict(net.state_dict())
+    print(f"  update device: {dev}   envs: {num_envs}", flush=True)
+    opt = torch.optim.Adam(learner.parameters(), lr=lr)
+
+    obs, _ = env.reset(seed=seed)  # seeds env i with seed + i
+    episode_return = np.zeros(num_envs, dtype=np.float64)
+    episode_returns: list[float] = []
     started = time.time()
     collected = 0
 
     while collected < steps:
-        buf_marquee, buf_agent, buf_raw = [], [], []
-        buf_logp, buf_val, buf_rew, buf_done = [], [], [], []
+        buf_marquee, buf_agent, buf_raw, buf_logp = [], [], [], []
+        buf_val = np.zeros((rollout, num_envs), dtype=np.float32)
+        buf_rew = np.zeros((rollout, num_envs), dtype=np.float32)
+        buf_done = np.zeros((rollout, num_envs), dtype=np.float32)
 
-        for _ in range(rollout):
+        for t in range(rollout):
             marquee, agent = as_tensors(obs)
             with torch.no_grad():
                 action, raw, log_prob, value = net.act(marquee, agent)
 
             obs, reward, terminated, truncated, _ = env.step(
-                action.squeeze(0).numpy().astype(np.float32)
+                action.numpy().astype(np.float32)
             )
-            done = bool(terminated or truncated)
+            done = np.logical_or(terminated, truncated)
 
             buf_marquee.append(marquee)
             buf_agent.append(agent)
             buf_raw.append(raw)
             buf_logp.append(log_prob)
-            buf_val.append(float(value))
-            buf_rew.append(float(reward))
-            buf_done.append(done)
+            buf_val[t] = value.numpy()
+            buf_rew[t] = reward
+            buf_done[t] = done
 
-            episode_return += float(reward)
-            collected += 1
-            if done:
-                episode_returns.append(episode_return)
-                episode_return = 0.0
-                obs, _ = env.reset()
+            episode_return += reward
+            collected += num_envs
+            for i in np.flatnonzero(done):
+                episode_returns.append(float(episode_return[i]))
+                episode_return[i] = 0.0
 
         with torch.no_grad():
             marquee, agent = as_tensors(obs)
-            last_value = float(net.act(marquee, agent)[3])
+            last_value = net.act(marquee, agent)[3].numpy()
 
         advantages, returns = discounted_advantages(
             buf_rew, buf_val, buf_done, last_value, gamma, lam
@@ -131,18 +197,21 @@ def train(
         # Normalizing advantages is what keeps the update scale sane when the
         # reward is a raw score delta that can sit at zero for long stretches
         # (a dancer who is not hitting cards earns nothing at all).
-        adv_t = torch.from_numpy(advantages)
+        adv_t = torch.from_numpy(advantages.reshape(-1)).to(dev)
         adv_t = (adv_t - adv_t.mean()) / (adv_t.std() + 1e-8)
 
-        marquee_t = torch.cat(buf_marquee)
-        agent_t = torch.cat(buf_agent)
-        raw_t = torch.cat(buf_raw)
-        logp_t = torch.cat(buf_logp)
-        ret_t = torch.from_numpy(returns)
+        # [T, N, ...] -> [T*N, ...]; every buffer flattens in the same
+        # time-major order, so row i of one lines up with row i of the rest.
+        marquee_t = torch.cat(buf_marquee).to(dev)
+        agent_t = torch.cat(buf_agent).to(dev)
+        raw_t = torch.cat(buf_raw).to(dev)
+        logp_t = torch.cat(buf_logp).to(dev)
+        ret_t = torch.from_numpy(returns.reshape(-1)).to(dev)
 
+        batch = rollout * num_envs
         for _ in range(epochs):
-            for idx in torch.randperm(len(buf_rew)).split(minibatch):
-                new_logp, entropy, value = net.evaluate(
+            for idx in torch.randperm(batch).split(minibatch):
+                new_logp, entropy, value = learner.evaluate(
                     marquee_t[idx], agent_t[idx], raw_t[idx]
                 )
                 ratio = (new_logp - logp_t[idx]).exp()
@@ -155,8 +224,11 @@ def train(
                 loss.backward()
                 # PPO without gradient clipping diverges readily on a reward
                 # this spiky; cheap insurance.
-                torch.nn.utils.clip_grad_norm_(net.parameters(), 0.5)
+                torch.nn.utils.clip_grad_norm_(learner.parameters(), 0.5)
                 opt.step()
+
+        if learner is not net:
+            net.load_state_dict(learner.state_dict())
 
         recent = episode_returns[-5:]
         mean_return = sum(recent) / len(recent) if recent else float("nan")
@@ -185,6 +257,17 @@ def main() -> None:
     )
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", default=None, help="write the trained .pt here")
+    p.add_argument(
+        "--device",
+        default=None,
+        help="update-pass device (cuda/mps/cpu); default: best available",
+    )
+    p.add_argument(
+        "--num-envs",
+        type=int,
+        default=8,
+        help="parallel engine instances for collection; 1 = in-process (debuggable)",
+    )
     args = p.parse_args()
 
     net = train(
@@ -192,7 +275,9 @@ def main() -> None:
         steps=args.steps,
         engine=args.engine,
         time_limit_ticks=args.time_limit_ticks,
+        num_envs=args.num_envs,
         seed=args.seed,
+        device=args.device,
     )
     if args.out:
         torch.save({"action_len": net.action_len, "state_dict": net.state_dict()}, args.out)

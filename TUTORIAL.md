@@ -162,17 +162,17 @@ a wasm component can do exactly this from the same `.fbs`.
 task train STEPS=1024
 ```
 
-`STEPS=1024` is a smoke-test run (~30 seconds of training) so you can watch
+`STEPS=1024` is a smoke-test run (a few seconds of training) so you can watch
 the whole pipeline; the default is 8192, and real training wants orders of
 magnitude more. Output:
 
 ```
 ── training [servo-assist] for 1024 steps
-      512/1024 steps  episodes=0    mean_return=     nan     3.5s
-     1024/1024 steps  episodes=0    mean_return=     nan     7.1s
+  update device: mps   envs: 8
+     1024/1024 steps  episodes=0    mean_return=     nan     2.8s
 → weights: out/policy.pt
 → onnx: out/policy.onnx (1208780 bytes)
-✓ torch/onnxruntime parity: max abs diff 3.725e-08
+✓ torch/onnxruntime parity: max abs diff 2.992e-08
 → bundle: out/agent-bundle
 
 Run it:   task match
@@ -181,12 +181,16 @@ Compete:  task upload
 
 Reading it:
 
-- `episodes=0`, `mean_return=nan` — 1024 steps isn't even one full episode
-  (the routine runs ~2773 ticks), so no episode ever finished. Expected for a
-  smoke run.
+- `update device: mps   envs: 8` — collection steps 8 engine instances in
+  parallel worker processes, and the PPO update pass runs on the best
+  available accelerator (here Apple MPS). Neither changes what trains — the
+  same policy comes out of a CPU-only box, just slower.
+- `episodes=0`, `mean_return=nan` — 1024 steps across 8 parallel envs is 128
+  ticks each, nowhere near a full episode (the routine runs ~2773 ticks), so
+  no episode ever finished. Expected for a smoke run.
 - The **parity check** re-runs the exported ONNX under onnxruntime — the
   exact runtime the platform's inference host uses — and compares against
-  torch. `3.7e-08` means the export IS the network you trained. A real graph
+  torch. `3.0e-08` means the export IS the network you trained. A real graph
   difference (a dropped activation, a transposed input) fails loudly here
   instead of silently shipping a broken agent.
 - The bundle is the submittable artifact:
