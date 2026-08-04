@@ -8,6 +8,11 @@
 # dance-off is only the DEFAULT, as the shipped reference game.
 version: "3"
 
+# Print what the task SAYS, not the shell line that says it. This is a
+# teaching repo: `task train` should read as its own progress output, not as
+# an echo of every `"{{.PY}}" -m train.core...` invocation ahead of it.
+silent: true
+
 dotenv: [".env"]
 
 vars:
