@@ -133,8 +133,8 @@ points with zero falls**. Remember that number.
 The sway bot again — but this time with **no Python, no ONNX, no prebuilt
 shell**. [`examples/rust-agent/`](examples/rust-agent/) implements the
 `lockstep:agent` WIT world directly (vendored under its `wit/`) and speaks
-the published FlatBuffers contract
-([`contract.fbs`](https://cdn.lockstep.mediabucket.io/games/dance-off/releases/0.6.1/servo-assist/contract.fbs),
+the published FlatBuffers contract (`contract.fbs` — the current one is on the
+game's [Interface tab](https://lockstep.games/games/dance-off/interface),
 vendored at `contract/dance-off.fbs`); `task contract` refreshes the vendored
 copy from the CDN release the engine pin points at. The View is
 read zero-copy — the 16 KB marquee raster is never even touched:

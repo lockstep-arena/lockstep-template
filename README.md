@@ -358,9 +358,10 @@ An agent IS a wasm component implementing the `lockstep:agent` world
 (vendored under [`examples/rust-agent/wit/`](examples/rust-agent/wit/)):
 opaque bytes in (the View), opaque bytes out (the Input). What those bytes
 mean is the game's wire contract — for dance-off, **FlatBuffers**, published
-next to every engine release as
-[`contract.fbs`](https://cdn.lockstep.mediabucket.io/games/dance-off/releases/0.6.1/servo-assist/contract.fbs)
-(and vendored at [`examples/rust-agent/contract/dance-off.fbs`](examples/rust-agent/contract/dance-off.fbs))
+as `contract.fbs` next to every engine release and rendered for the current
+one on the game's [Interface tab](https://lockstep.games/games/dance-off/interface)
+(vendored here at [`examples/rust-agent/contract/dance-off.fbs`](examples/rust-agent/contract/dance-off.fbs),
+refreshed by `task contract`)
 — codegen-able for any language that compiles to a wasm component. Two ways
 to get a component:
 
