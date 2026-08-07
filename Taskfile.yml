@@ -80,8 +80,7 @@ tasks:
       - 'echo "Run it:  task match BUNDLE=examples/rust-agent/target/wasm32-wasip2/release/rust_agent.wasm"'
 
   match:
-    desc: "Run a real local match with a bundle in both seats. GAME= BUNDLE=out/agent-bundle"
-    deps: [engine]
+    desc: "Run a real local match with a bundle in both seats. GAME= BUNDLE=out/agent-bundle (the engine's MODE comes from the bundle's lockstep.toml; MODE= only matters for a bare .wasm)"
     vars:
       BUNDLE: '{{.BUNDLE | default "out/agent-bundle"}}'
     preconditions:
@@ -90,6 +89,12 @@ tasks:
       - sh: test -f {{.BUNDLE}}/lockstep.toml || test -f {{.BUNDLE}}
         msg: "nothing at {{.BUNDLE}} — `task train`, `task scripted`, or `task rust-agent` first"
     cmds:
+      # NOT the plain `engine` dep: that fetches the DEFAULT mode's engine
+      # when MODE= is unset, silently replacing the one `task train MODE=x`
+      # downloaded — and a mode-mismatched match doesn't fail, it plays out
+      # as an agent that can't read a single observation. --bundle lets the
+      # bundle's own lockstep.toml pick the engine instead.
+      - '"{{.PY}}" -m train.core.engine --game "{{.GAME}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} --bundle "{{.BUNDLE}}" --out out/engine.wasm'
       - |
         lockstep match run --slug "{{.GAME}}" \
           --engine out/engine.wasm \

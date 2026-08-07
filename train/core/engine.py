@@ -9,17 +9,67 @@ Usage::
 
     python -m train.core.engine --game <slug> --out out/engine.wasm
     python -m train.core.engine --game <slug> --mode <mode> --print-url
+    python -m train.core.engine --game <slug> --bundle out/agent-bundle --out out/engine.wasm
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+import tomllib
 import urllib.request
+import zipfile
 from pathlib import Path
 
 from . import utf8_output
 from .discovery import resolve_game
+
+
+def bundle_manifest(bundle: Path) -> dict | None:
+    """The ``lockstep.toml`` of a staged bundle (directory or .zip), or
+    ``None`` for anything else — a bare component ``.wasm`` has no manifest
+    and therefore no mode of its own."""
+    if bundle.is_dir():
+        manifest = bundle / "lockstep.toml"
+        if manifest.is_file():
+            return tomllib.loads(manifest.read_text())
+        return None
+    if bundle.is_file() and bundle.suffix == ".zip":
+        with zipfile.ZipFile(bundle) as zf:
+            try:
+                with zf.open("lockstep.toml") as f:
+                    return tomllib.loads(f.read().decode())
+            except KeyError:
+                return None
+    return None
+
+
+def resolve_mode(spec: dict, mode: str | None, bundle: Path | None) -> str | None:
+    """Which mode's engine to fetch: the explicit ``--mode`` wins, else the
+    mode the bundle's manifest says it was staged for, else the game default.
+
+    A match of bundle-vs-engine across modes does not fail cleanly — it
+    plays out as an agent that can't decode a single observation — so a
+    disagreement between an explicit ``--mode`` and the bundle's declared
+    mode is an error here, where it can still say what to do about it."""
+    manifest = bundle_manifest(bundle) if bundle else None
+    if manifest is None:
+        return mode
+    bundle_game = manifest.get("game")
+    if bundle_game and bundle_game != spec["slug"]:
+        raise SystemExit(
+            f"bundle {bundle} was staged for game {bundle_game!r}, not "
+            f"{spec['slug']!r} — retrain (task train GAME={spec['slug']}) "
+            f"or pass the right GAME="
+        )
+    bundle_mode = manifest.get("mode")
+    if mode and bundle_mode and mode != bundle_mode:
+        raise SystemExit(
+            f"bundle {bundle} was staged for mode {bundle_mode!r} but "
+            f"MODE={mode} was asked for — drop MODE= to use the bundle's "
+            f"own mode, or retrain with MODE={mode}"
+        )
+    return mode or bundle_mode
 
 
 def engine_url(spec: dict, mode: str | None) -> str:
@@ -56,6 +106,13 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--game", default=None, help="defaults to the one installed game")
     p.add_argument("--mode", default=None, help="defaults to the game's default mode")
+    p.add_argument(
+        "--bundle",
+        default=None,
+        help="an agent bundle (dir or .zip) whose lockstep.toml picks the "
+        "mode when --mode is not given; a bare .wasm is fine and picks "
+        "nothing",
+    )
     p.add_argument("--out", default="out/engine.wasm")
     p.add_argument(
         "--print-url",
@@ -65,7 +122,10 @@ def main() -> None:
     args = p.parse_args()
 
     spec, _module = resolve_game(args.game)
-    url = engine_url(spec, args.mode or None)
+    mode = resolve_mode(
+        spec, args.mode or None, Path(args.bundle) if args.bundle else None
+    )
+    url = engine_url(spec, mode)
     if args.print_url:
         print(url)
         return

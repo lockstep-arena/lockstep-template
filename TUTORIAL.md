@@ -299,7 +299,9 @@ To sanity-check a bundle without credentials:
   [the README](README.md#bring-your-own-training-stack).
 - **Try the research tier**: `task train MODE=raw-torque` — no servo
   assistance, your policy outputs raw joint torques (action becomes
-  `(36,)`). Its own ladder; a bundle targets exactly one tier.
+  `(36,)`). Its own ladder; a bundle targets exactly one tier. A plain
+  `task match` afterwards does the right thing: the staged bundle records
+  the mode it was trained for, and the match fetches that mode's engine.
 - **Replace the network**: `train/` is yours. Only the derived ONNX
   signature (obs keys → `action`, enforced by `train/core/export.py`) and
   the bundle layout are load-bearing — see
