@@ -88,6 +88,7 @@ def make_env_factory(
     mode: str,
     engine: str | None,
     time_limit_ticks: int | None,
+    env_kwargs: dict | None = None,
 ):
     """A spawn-safe env factory.
 
@@ -106,6 +107,7 @@ def make_env_factory(
             mode=mode,
             engine_source=engine,
             time_limit_ticks=time_limit_ticks,
+            **(env_kwargs or {}),
         )
 
     return make
@@ -118,6 +120,7 @@ def make_vec_env(
     engine: str | None,
     time_limit_ticks: int | None,
     num_envs: int,
+    env_kwargs: dict | None = None,
 ):
     """``num_envs`` engines stepping in parallel.
 
@@ -162,6 +165,7 @@ def make_vec_env(
                 mode=mode,
                 engine_source=engine,
                 time_limit_ticks=time_limit_ticks,
+                **(env_kwargs or {}),
             )
             if env.metadata.get("autoreset_mode") is not AutoresetMode.SAME_STEP:
                 raise RuntimeError(
@@ -172,7 +176,7 @@ def make_vec_env(
             return env
 
     fns = [
-        make_env_factory(spec_module, env_id, mode, engine, time_limit_ticks)
+        make_env_factory(spec_module, env_id, mode, engine, time_limit_ticks, env_kwargs)
         for _ in range(num_envs)
     ]
     if num_envs == 1:
@@ -253,11 +257,17 @@ def train(
     device: str | None = None,
     out_dir: Path = Path("out"),
     resume: bool = False,
+    opponent: str | None = None,
 ) -> Policy:
     torch.manual_seed(seed)
     num_envs = num_envs if num_envs is not None else default_num_envs()
+    # `opponent` stays a plain string all the way into the (possibly
+    # spawned) factory: the game env resolves it — an .onnx path today.
+    # Only games whose env takes the kwarg accept it; main.py pre-flights
+    # that so the failure names the game, not a pickled TypeError.
+    env_kwargs = {"opponent": opponent} if opponent else None
     env = make_vec_env(
-        spec_module, spec["env_id"], mode, engine, time_limit_ticks, num_envs
+        spec_module, spec["env_id"], mode, engine, time_limit_ticks, num_envs, env_kwargs
     )
     net = Policy(env.single_observation_space, env.single_action_space)
 
