@@ -87,8 +87,7 @@ def main() -> None:
         help="fill seat 1 with a frozen policy (.onnx path, e.g. a previous "
         "run's out/agent-bundle/artifacts/policy.onnx) instead of the idle "
         "baseline — the self-play hook. Only for games whose env has an "
-        "opponent seat to fill (jetpack-joust today; dance-off is "
-        "opponent-blind by design)",
+        "opponent seat to fill; other games refuse with a message",
     )
     p.add_argument(
         "--num-envs",

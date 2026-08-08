@@ -126,8 +126,11 @@ tasks:
         fi
 
   test:
-    desc: "Run the template's own tests (import-lint + vec-env semantics; needs setup + engine)."
+    desc: "Run the template's own tests (import-lint + vec-env semantics; needs setup + engine). GAME= must match the engine (several game packages can be installed at once)."
     deps: [engine]
     cmds:
       - '"{{.VENV}}/bin/pip" install --quiet pytest'
-      - '"{{.PY}}" -m pytest tests -q'
+      # The vec-env tests resolve "the installed game" — ambiguous once a
+      # second game package is installed. Name the one whose engine the
+      # `engine` dep just fetched.
+      - 'LOCKSTEP_TEST_GAME="{{.GAME}}" "{{.PY}}" -m pytest tests -q'
