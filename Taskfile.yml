@@ -39,7 +39,7 @@ tasks:
       - '"{{.PY}}" -m train.core.engine --game "{{.GAME}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} --out out/engine.wasm'
 
   train:
-    desc: "PPO → ONNX → parity check → stage out/agent-bundle. GAME= MODE= STEPS=8192 NUM_ENVS=(cores-2, max 8) RESUME=1 to continue a crashed run"
+    desc: "PPO → ONNX → parity check → stage out/agent-bundle. GAME= MODE= STEPS=8192 NUM_ENVS=(cores-2, max 8) RESUME=1 to continue a crashed run. OPPONENT=<policy.onnx> fills seat 1 with a frozen policy (self-play) on games that support it"
     deps: [engine]
     vars:
       STEPS: '{{.STEPS | default "8192"}}'
@@ -49,6 +49,7 @@ tasks:
         {{if .MODE}}--mode "{{.MODE}}"{{end}}
         {{if .NUM_ENVS}}--num-envs {{.NUM_ENVS}}{{end}}
         {{if .RESUME}}--resume{{end}}
+        {{if .OPPONENT}}--opponent "{{.OPPONENT}}"{{end}}
         --engine out/engine.wasm
 
   scripted:
@@ -125,8 +126,11 @@ tasks:
         fi
 
   test:
-    desc: "Run the template's own tests (import-lint + vec-env semantics; needs setup + engine)."
+    desc: "Run the template's own tests (import-lint + vec-env semantics; needs setup + engine). GAME= must match the engine (several game packages can be installed at once)."
     deps: [engine]
     cmds:
       - '"{{.VENV}}/bin/pip" install --quiet pytest'
-      - '"{{.PY}}" -m pytest tests -q'
+      # The vec-env tests resolve "the installed game" — ambiguous once a
+      # second game package is installed. Name the one whose engine the
+      # `engine` dep just fetched.
+      - 'LOCKSTEP_TEST_GAME="{{.GAME}}" "{{.PY}}" -m pytest tests -q'

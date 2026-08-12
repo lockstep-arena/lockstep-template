@@ -82,6 +82,14 @@ def main() -> None:
         help="update-pass device (cuda/mps/cpu); default: best available",
     )
     p.add_argument(
+        "--opponent",
+        default=None,
+        help="fill seat 1 with a frozen policy (.onnx path, e.g. a previous "
+        "run's out/agent-bundle/artifacts/policy.onnx) instead of the idle "
+        "baseline — the self-play hook. Only for games whose env has an "
+        "opponent seat to fill; other games refuse with a message",
+    )
+    p.add_argument(
         "--num-envs",
         type=int,
         default=None,
@@ -97,6 +105,26 @@ def main() -> None:
             f"game {spec['slug']!r} has no mode {mode!r} "
             f"(modes: {', '.join(sorted(spec['modes']))})"
         )
+
+    if args.opponent:
+        # Pre-flight here, where the error can name the game: inside a
+        # spawned env worker this surfaces as a pickled TypeError.
+        import inspect
+
+        import gymnasium
+
+        env_spec = gymnasium.registry.get(spec["env_id"])
+        ctor = env_spec.entry_point
+        if isinstance(ctor, str):
+            module, _, attr = ctor.partition(":")
+            import importlib
+
+            ctor = getattr(importlib.import_module(module), attr)
+        if "opponent" not in inspect.signature(ctor).parameters:
+            raise SystemExit(
+                f"--opponent: {spec['slug']!r} has no opponent seat to fill "
+                "(its env takes no `opponent` option)"
+            )
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -119,6 +147,7 @@ def main() -> None:
             device=args.device,
             out_dir=OUT_DIR,
             resume=args.resume,
+            opponent=args.opponent,
         )
         weights = OUT_DIR / "policy.pt"
         torch.save(

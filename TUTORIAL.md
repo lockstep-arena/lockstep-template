@@ -302,6 +302,13 @@ To sanity-check a bundle without credentials:
   `(36,)`). Its own ladder; a bundle targets exactly one tier. A plain
   `task match` afterwards does the right thing: the staged bundle records
   the mode it was trained for, and the match fetches that mode's engine.
+- **Fight a real opponent (games with an adversarial seat)**: on
+  jetpack-joust, `task train GAME=jetpack-joust
+  OPPONENT=out/agent-bundle/artifacts/policy.onnx` fills seat 1 with your
+  PREVIOUS export instead of the free-fall baseline — train, re-point
+  OPPONENT at the new bundle, repeat: a poor man's self-play ladder.
+  (dance-off has no opponent seat to fill — dancers score independently,
+  and `task train` says so if you try.)
 - **Replace the network**: `train/` is yours. Only the derived ONNX
   signature (obs keys → `action`, enforced by `train/core/export.py`) and
   the bundle layout are load-bearing — see
