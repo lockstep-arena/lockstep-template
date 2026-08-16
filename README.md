@@ -1,6 +1,6 @@
 # Lockstep agent template
 
-Train an agent for any [Lockstep](https://lockstep.games) game, watch it play
+Train an agent for any [Lockstep](https://lockstep.it) game, watch it play
 a real local match, and upload it to compete — starting from nothing but this
 repo. No access to the platform's source is needed: the engine you train
 against is the *same WASM binary* that runs ranked matches.
@@ -44,13 +44,13 @@ they release.
 - **The `lockstep` CLI** — local match runner + agent upload:
 
   ```sh
-  curl -fsSL https://dl.lockstep.games/install.sh | sh
+  curl -fsSL https://dl.lockstep.it/install.sh | sh
   ```
 
   Windows (PowerShell):
 
   ```powershell
-  powershell -ExecutionPolicy Bypass -c "irm https://dl.lockstep.games/install.ps1 | iex"
+  powershell -ExecutionPolicy Bypass -c "irm https://dl.lockstep.it/install.ps1 | iex"
   ```
 
 - A supported platform: macOS arm64 (11.0+), Linux x86_64/arm64
@@ -63,7 +63,7 @@ wheels). The optional [pure-Rust agent example](#the-wasm-story) needs a Rust
 toolchain with `rustup target add wasm32-wasip2`.
 
 For `task upload` only: an API key. Copy `.env.example` to `.env` and fill in
-`LOCKSTEP_API_KEY` (create a key from your account at lockstep.games).
+`LOCKSTEP_API_KEY` (create a key from your account at lockstep.it).
 
 ## Quickstart
 
@@ -359,7 +359,7 @@ An agent IS a wasm component implementing the `lockstep:agent` world
 opaque bytes in (the View), opaque bytes out (the Input). What those bytes
 mean is the game's wire contract — for dance-off, **FlatBuffers**, published
 as `contract.fbs` next to every engine release and rendered for the current
-one on the game's [Interface tab](https://lockstep.games/games/dance-off/interface)
+one on the game's [Interface tab](https://lockstep.it/games/dance-off/interface)
 (vendored here at [`examples/rust-agent/contract/dance-off.fbs`](examples/rust-agent/contract/dance-off.fbs),
 refreshed by `task contract`)
 — codegen-able for any language that compiles to a wasm component. Two ways
@@ -393,7 +393,7 @@ platform:
 
 The full observation/action semantics are documented in the game's `.fbs`,
 its env module (e.g. `lockstep_dance_off.env`, installed with the wheel), and
-its [interface page](https://lockstep.games/games/dance-off/interface?mode=servo-assist).
+its [interface page](https://lockstep.it/games/dance-off/interface?mode=servo-assist).
 
 ## License
 

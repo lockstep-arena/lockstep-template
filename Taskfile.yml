@@ -86,7 +86,7 @@ tasks:
       BUNDLE: '{{.BUNDLE | default "out/agent-bundle"}}'
     preconditions:
       - sh: command -v lockstep
-        msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.games/install.sh | sh"
+        msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
       - sh: test -f {{.BUNDLE}}/lockstep.toml || test -f {{.BUNDLE}}
         msg: "nothing at {{.BUNDLE}} — `task train`, `task scripted`, or `task rust-agent` first"
     cmds:
@@ -108,7 +108,7 @@ tasks:
     desc: "Upload the bundle to compete. Needs LOCKSTEP_API_KEY in .env. GAME= NAME=my-agent AGENT_ID=<id> for a revision."
     preconditions:
       - sh: command -v lockstep
-        msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.games/install.sh | sh"
+        msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
       - sh: test -f out/agent-bundle/lockstep.toml
         msg: "no trained bundle yet — run: task train"
       - sh: test -n "${LOCKSTEP_API_KEY:-}"
