@@ -14,7 +14,7 @@ the platform an agent is just an ONNX graph with the right signature sitting
 next to the mode's WASM shell. Where the policy came from is your business.
 
 The observation and action types used throughout are documented on the
-[dance-off interface page](https://lockstep.games/games/dance-off/interface?mode=servo-assist).
+[dance-off interface page](https://lockstep.it/games/dance-off/interface?mode=servo-assist).
 
 Everything below assumes you've done the [prerequisites](README.md#prerequisites)
 and `task setup`.
@@ -70,7 +70,7 @@ Three things worth absorbing:
   goal signal: what you're being asked to dance, and how soon.
 - **The agent vector is body state** — root pose, 12 joint quaternions,
   fallen flag, combo, score, tick (full layout in `lockstep_dance_off.env`
-  and on the [interface page](https://lockstep.games/games/dance-off/interface?mode=servo-assist)).
+  and on the [interface page](https://lockstep.it/games/dance-off/interface?mode=servo-assist)).
 - **Random flailing earns exactly zero.** Reward is the per-step score
   delta, and score comes from hitting move cards with good posture. This
   game does not pay for enthusiasm.
@@ -134,7 +134,7 @@ The sway bot again — but this time with **no Python, no ONNX, no prebuilt
 shell**. [`examples/rust-agent/`](examples/rust-agent/) implements the
 `lockstep:agent` WIT world directly (vendored under its `wit/`) and speaks
 the published FlatBuffers contract (`contract.fbs` — the current one is on the
-game's [Interface tab](https://lockstep.games/games/dance-off/interface),
+game's [Interface tab](https://lockstep.it/games/dance-off/interface),
 vendored at `contract/dance-off.fbs`); `task contract` refreshes the vendored
 copy from the CDN release the engine pin points at. The View is
 read zero-copy — the 16 KB marquee raster is never even touched:
@@ -313,7 +313,7 @@ To sanity-check a bundle without credentials:
   signature (obs keys → `action`, enforced by `train/core/export.py`) and
   the bundle layout are load-bearing — see
   [the contract](README.md#the-contract) and the
-  [interface page](https://lockstep.games/games/dance-off/interface?mode=servo-assist)
+  [interface page](https://lockstep.it/games/dance-off/interface?mode=servo-assist)
   for the types.
 - **Get smarter than a sine wave without RL**: `examples/scripted_agent.py`
   never looks at the marquee. A scripted policy that *reads the cards* is a

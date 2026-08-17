@@ -18,7 +18,7 @@ policy — any module exposing ``input_names`` / ``input_shapes`` /
 This example is dance-off-specific on purpose (it is the shipped reference
 game); the pipeline it rides is not. The observation/action types this
 policy sees are documented at
-https://lockstep.games/games/dance-off/interface?mode=servo-assist
+https://lockstep.it/games/dance-off/interface?mode=servo-assist
 """
 
 from __future__ import annotations
