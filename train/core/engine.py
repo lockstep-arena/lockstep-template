@@ -1,15 +1,21 @@
-"""Fetch a game's pinned engine wasm (``task engine`` runs this).
+"""Fetch an environment's released artifacts (``task engine`` runs this).
 
-The engine URL is not template configuration — it comes from the installed
-game package's GameSpec, which pins the exact published release its codec
-was built against. This helper downloads it next to a ``.url`` stamp so
-switching ``GAME``/``MODE`` re-downloads and unchanged re-runs are no-ops.
+Downloads BOTH halves of the agent story next to each other::
+
+    out/engine.wasm       the mode's engine — what you train against
+    out/agent-onnx.wasm   the generic ONNX agent shell — what you ship
+
+The shell is generic across every environment (it reads the tensor-wire
+declaration and binds ONNX inputs by name), but it is versioned WITH the
+release, so it is fetched from the same release directory rather than
+pinned here. Each file gets a ``.url`` stamp so switching ``ENV``/``MODE``
+re-downloads and unchanged re-runs are no-ops.
 
 Usage::
 
-    python -m train.core.engine --game <slug> --out out/engine.wasm
-    python -m train.core.engine --game <slug> --mode <mode> --print-url
-    python -m train.core.engine --game <slug> --bundle out/agent-bundle --out out/engine.wasm
+    python -m train.core.engine --env <slug> [--version V] [--mode M] --out out
+    python -m train.core.engine --env <slug> --print-url
+    python -m train.core.engine --env <slug> --bundle out/agent-bundle --out out
 """
 
 from __future__ import annotations
@@ -22,7 +28,7 @@ import zipfile
 from pathlib import Path
 
 from . import utf8_output
-from .discovery import resolve_game
+from .discovery import EnvRelease, resolve
 
 
 def bundle_manifest(bundle: Path) -> dict | None:
@@ -44,9 +50,10 @@ def bundle_manifest(bundle: Path) -> dict | None:
     return None
 
 
-def resolve_mode(spec: dict, mode: str | None, bundle: Path | None) -> str | None:
+def resolve_mode(slug: str, mode: str | None, bundle: Path | None) -> str | None:
     """Which mode's engine to fetch: the explicit ``--mode`` wins, else the
-    mode the bundle's manifest says it was staged for, else the game default.
+    mode the bundle's manifest says it was staged for, else the release
+    default (``None`` here → :func:`train.core.discovery.resolve` decides).
 
     A match of bundle-vs-engine across modes does not fail cleanly — it
     plays out as an agent that can't decode a single observation — so a
@@ -55,12 +62,11 @@ def resolve_mode(spec: dict, mode: str | None, bundle: Path | None) -> str | Non
     manifest = bundle_manifest(bundle) if bundle else None
     if manifest is None:
         return mode
-    bundle_game = manifest.get("game")
-    if bundle_game and bundle_game != spec["slug"]:
+    bundle_env = manifest.get("environment")
+    if bundle_env and bundle_env != slug:
         raise SystemExit(
-            f"bundle {bundle} was staged for game {bundle_game!r}, not "
-            f"{spec['slug']!r} — retrain (task train GAME={spec['slug']}) "
-            f"or pass the right GAME="
+            f"bundle {bundle} was staged for environment {bundle_env!r}, not "
+            f"{slug!r} — retrain (task train ENV={slug}) or pass the right ENV="
         )
     bundle_mode = manifest.get("mode")
     if mode and bundle_mode and mode != bundle_mode:
@@ -72,17 +78,7 @@ def resolve_mode(spec: dict, mode: str | None, bundle: Path | None) -> str | Non
     return mode or bundle_mode
 
 
-def engine_url(spec: dict, mode: str | None) -> str:
-    mode = mode or spec["default_mode"]
-    if mode not in spec["modes"]:
-        raise SystemExit(
-            f"game {spec['slug']!r} has no mode {mode!r} "
-            f"(modes: {', '.join(sorted(spec['modes']))})"
-        )
-    return spec["modes"][mode]["engine_url"]
-
-
-def fetch(url: str, out: Path) -> bool:
+def fetch_file(url: str, out: Path) -> bool:
     """Download ``url`` to ``out``; returns False if the stamp says it's
     already there. Atomic (tmp then replace), like everything under out/."""
     stamp = out.with_suffix(out.suffix + ".url")
@@ -90,10 +86,7 @@ def fetch(url: str, out: Path) -> bool:
         return False
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(out.suffix + ".tmp")
-    # A named User-Agent: the CDN rejects Python's default one.
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "lockstep-template-engine-fetch"}
-    )
+    req = urllib.request.Request(url, headers={"User-Agent": "lockstep-template"})
     with urllib.request.urlopen(req) as resp:
         tmp.write_bytes(resp.read())
     tmp.replace(out)
@@ -101,11 +94,28 @@ def fetch(url: str, out: Path) -> bool:
     return True
 
 
+def fetch_release(release: EnvRelease, out_dir: Path) -> dict[str, Path]:
+    """Engine + generic agent shell into ``out_dir``; ``{name: path}``."""
+    written = {}
+    for name, url in (
+        ("engine.wasm", release.engine_url),
+        ("agent-onnx.wasm", release.agent_shell_url),
+    ):
+        path = out_dir / name
+        if fetch_file(url, path):
+            print(f"→ {path}  ({url})")
+        else:
+            print(f"✓ {path} up to date")
+        written[name] = path
+    return written
+
+
 def main() -> None:
     utf8_output()
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--game", default=None, help="defaults to the one installed game")
-    p.add_argument("--mode", default=None, help="defaults to the game's default mode")
+    p.add_argument("--env", required=True, help="environment slug (ENV= on the task line)")
+    p.add_argument("--version", default=None, help="release version; default latest")
+    p.add_argument("--mode", default=None, help="mode key; default the release's default_mode")
     p.add_argument(
         "--bundle",
         default=None,
@@ -113,27 +123,20 @@ def main() -> None:
         "mode when --mode is not given; a bare .wasm is fine and picks "
         "nothing",
     )
-    p.add_argument("--out", default="out/engine.wasm")
+    p.add_argument("--out", default="out", help="output DIRECTORY")
     p.add_argument(
         "--print-url",
         action="store_true",
-        help="print the pinned engine URL instead of downloading",
+        help="print the resolved engine URL instead of downloading",
     )
     args = p.parse_args()
 
-    spec, _module = resolve_game(args.game)
-    mode = resolve_mode(
-        spec, args.mode or None, Path(args.bundle) if args.bundle else None
-    )
-    url = engine_url(spec, mode)
+    mode = resolve_mode(args.env, args.mode or None, Path(args.bundle) if args.bundle else None)
+    release = resolve(args.env, args.version, mode)
     if args.print_url:
-        print(url)
+        print(release.engine_url)
         return
-    out = Path(args.out)
-    if fetch(url, out):
-        print(f"→ {out}  ({url})")
-    else:
-        print(f"✓ {out} up to date")
+    fetch_release(release, Path(args.out))
 
 
 if __name__ == "__main__":

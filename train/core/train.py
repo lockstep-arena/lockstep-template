@@ -1,10 +1,11 @@
-"""A small, real PPO loop over any discovered game's Gymnasium env.
+"""A small, real PPO loop over the generic Lockstep Gymnasium env.
 
 Real in the sense that matters here: it steps the ACTUAL engine wasm through
 ``lockstep_train``, with the same physics and the same observations a ranked
-match uses. It is not tuned, and a short run produces a weak agent — that is
+match uses. There is nothing per-environment in it — the env, the spaces and
+the reward all come from the engine's own tensor-wire declaration. It is not tuned, and a short run produces a weak agent — that is
 expected, and the README says so. What it produces is a genuine policy whose
-weights came from playing the game, which is what makes the exported ONNX
+weights came from playing the environment, which is what makes the exported ONNX
 worth shipping.
 
 Kept deliberately small (no RL framework) because the interesting part of
@@ -82,58 +83,59 @@ def pick_device() -> torch.device:
     return torch.device("cpu")
 
 
+#: The one env id this template ever makes. Registered by importing
+#: ``lockstep_train.env`` (a side effect the factories below re-trigger in
+#: spawned workers, which start with a fresh interpreter).
+ENV_ID = "Lockstep/Env-v0"
+
+
 def make_env_factory(
-    spec_module: str,
-    env_id: str,
-    mode: str,
     engine: str | None,
     time_limit_ticks: int | None,
-    env_kwargs: dict | None = None,
 ):
     """A spawn-safe env factory.
 
     Spawned workers (the default on macOS and Windows) start with a fresh
     interpreter, and env registration is an import side effect — so the
-    factory re-imports the game package's module before ``gymnasium.make``
-    can resolve the id. Closing over plain strings keeps it picklable.
+    factory re-imports ``lockstep_train.env`` before ``gymnasium.make`` can
+    resolve the id. Closing over plain strings keeps it picklable.
+
+    There is no mode parameter: an engine wasm IS one mode, so the mode was
+    chosen when ``task engine`` picked which file to download. Multi-seat
+    engines are driven on seat 0 with every other seat playing the wire's
+    neutral action — the documented single-agent view of a duel.
     """
 
     def make():
-        importlib.import_module(spec_module)
+        importlib.import_module("lockstep_train.env")
         import gymnasium
 
         return gymnasium.make(
-            env_id,
-            mode=mode,
+            ENV_ID,
             engine_source=engine,
             time_limit_ticks=time_limit_ticks,
-            **(env_kwargs or {}),
         )
 
     return make
 
 
 def make_vec_env(
-    spec_module: str,
-    env_id: str,
-    mode: str,
     engine: str | None,
     time_limit_ticks: int | None,
     num_envs: int,
-    env_kwargs: dict | None = None,
 ):
     """``num_envs`` engines stepping in parallel.
 
     Three paths, best available first:
 
-    - A game that registers a NATIVE vector env (``vector_entry_point`` —
-      N engines on Rust threads in THIS process, GIL released) gets it by
-      default: no worker processes, no per-step IPC, fastest on every OS.
-      The games-side conformance suite holds it step-for-step identical to
-      the process path, so this is a throughput choice, never a semantics
-      one.
-    - Otherwise ``AsyncVectorEnv``, one worker process per env — the
-      portable standard-API path every game supports.
+    - ``lockstep_train`` registers a NATIVE vector env
+      (``vector_entry_point`` — N engines on Rust threads in THIS process,
+      GIL released), so ``num_envs > 1`` gets it by default: no worker
+      processes, no per-step IPC, fastest on every OS. Its conformance
+      suite holds it step-for-step identical to the process path, so this
+      is a throughput choice, never a semantics one.
+    - ``AsyncVectorEnv`` (one worker process per env) stays as the fallback
+      the standard Gymnasium API guarantees.
     - ``num_envs=1`` uses the in-process ``SyncVectorEnv`` — same API, no
       parallelism — which is the one to debug under (breakpoints reach the
       env).
@@ -153,32 +155,27 @@ def make_vec_env(
     to debug.
     """
     if num_envs > 1:
-        importlib.import_module(spec_module)  # registration side effect
+        importlib.import_module("lockstep_train.env")  # registration side effect
         import gymnasium
 
-        spec = gymnasium.registry.get(env_id)
+        spec = gymnasium.registry.get(ENV_ID)
         if spec is not None and spec.vector_entry_point is not None:
             env = gymnasium.make_vec(
-                env_id,
+                ENV_ID,
                 num_envs=num_envs,
                 vectorization_mode="vector_entry_point",
-                mode=mode,
                 engine_source=engine,
                 time_limit_ticks=time_limit_ticks,
-                **(env_kwargs or {}),
             )
             if env.metadata.get("autoreset_mode") is not AutoresetMode.SAME_STEP:
                 raise RuntimeError(
-                    f"{env_id} native vector env declares "
+                    f"{ENV_ID} native vector env declares "
                     f"{env.metadata.get('autoreset_mode')!r}; the loop "
                     "requires SAME_STEP autoreset semantics"
                 )
             return env
 
-    fns = [
-        make_env_factory(spec_module, env_id, mode, engine, time_limit_ticks, env_kwargs)
-        for _ in range(num_envs)
-    ]
+    fns = [make_env_factory(engine, time_limit_ticks) for _ in range(num_envs)]
     if num_envs == 1:
         return SyncVectorEnv(fns, autoreset_mode=AutoresetMode.SAME_STEP)
     return AsyncVectorEnv(fns, autoreset_mode=AutoresetMode.SAME_STEP, context="spawn")
@@ -238,9 +235,6 @@ def save_checkpoint(path: Path, net: Policy, opt: torch.optim.Optimizer, collect
 
 
 def train(
-    spec: dict,
-    spec_module: str,
-    mode: str,
     steps: int,
     engine: str | None = None,
     time_limit_ticks: int | None = None,
@@ -257,18 +251,10 @@ def train(
     device: str | None = None,
     out_dir: Path = Path("out"),
     resume: bool = False,
-    opponent: str | None = None,
 ) -> Policy:
     torch.manual_seed(seed)
     num_envs = num_envs if num_envs is not None else default_num_envs()
-    # `opponent` stays a plain string all the way into the (possibly
-    # spawned) factory: the game env resolves it — an .onnx path today.
-    # Only games whose env takes the kwarg accept it; main.py pre-flights
-    # that so the failure names the game, not a pickled TypeError.
-    env_kwargs = {"opponent": opponent} if opponent else None
-    env = make_vec_env(
-        spec_module, spec["env_id"], mode, engine, time_limit_ticks, num_envs, env_kwargs
-    )
+    env = make_vec_env(engine, time_limit_ticks, num_envs)
     net = Policy(env.single_observation_space, env.single_action_space)
 
     dev = torch.device(device) if device else pick_device()

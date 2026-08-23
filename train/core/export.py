@@ -40,10 +40,15 @@ def sample_inputs(net: Policy, batch: int = 1) -> tuple[torch.Tensor, ...]:
     standard normals.
     """
     generator = torch.Generator().manual_seed(0)
+    dtypes = getattr(net, "input_dtypes", {})
     tensors = []
     for name in net.input_names:
         shape = (batch, *net.input_shapes[name])
-        if len(shape) == 4:
+        if dtypes.get(name) == "int32":
+            tensors.append(
+                torch.randint(0, 4, shape, generator=generator, dtype=torch.int32)
+            )
+        elif len(shape) == 4:
             tensors.append(torch.rand(*shape, generator=generator))
         else:
             tensors.append(torch.randn(*shape, generator=generator))

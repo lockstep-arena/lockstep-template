@@ -1,19 +1,20 @@
-"""Shared-policy self-play PPO over a game's PettingZoo ``ParallelEnv`` —
-BOTH seats learning at once.
+"""Shared-policy self-play PPO over the generic PettingZoo ``ParallelEnv``
+— BOTH seats learning at once.
 
-``train.core.train`` trains one seat of a Gymnasium env (optionally against
-a frozen ``--opponent``). This loop is the step beyond that for games whose
-seats are genuinely adversarial: the game's parallel env steps every seat
-every tick, ONE network chooses every seat's action from that seat's own
-observation, and every seat's transition lands in the same PPO buffer. The
+``train.core.train`` trains seat 0 of a Gymnasium env (other seats play the
+wire's neutral action). This loop is the step beyond that for environments
+whose seats are genuinely adversarial: ``lockstep_train``'s parallel env
+steps every seat every tick, ONE network chooses every seat's action from
+that seat's own observation, and every seat's transition lands in the same
+PPO buffer. The
 opponent is never frozen — it is the same policy, one update behind
 nothing. This is the first rung of self-play (the standard one); league or
 population play is deliberately out of scope here.
 
 Why one policy and not one per seat: competition is one agent per seat
 answering ``on_tick`` from its own view, and the seats are symmetric (same
-observation layout, same action space — the games-side conformance suite
-asserts it). A single policy is exactly what gets exported, so the artifact
+observation layout, same action space — checked below). A single policy is
+exactly what gets exported, so the artifact
 is unchanged: ONE ``policy.onnx`` per bundle, through the same export →
 parity → stage path as the single-seat loop. PettingZoo is a training-side
 view only.
@@ -29,21 +30,18 @@ experience is on this page.
 Not a vector API: this loop drives ONE parallel env. PettingZoo has no
 vector API and this repo does not invent one — and it does not need to: the
 engine steps at tens of thousands of ticks per second, so a two-seat loop is
-bound by the network, not the env. If a game ever ships a "stacked
-sessions" helper, this is the place it would plug in.
+bound by the network, not the env.
 """
 
 from __future__ import annotations
 
 import csv
-import importlib
 import time
 from pathlib import Path
 
 import numpy as np
 import torch
 
-from .discovery import require_parallel_env_id
 from .policy import Policy, obs_to_tensors
 from .train import METRICS_FIELDS, discounted_advantages, pick_device, save_checkpoint
 
@@ -54,26 +52,23 @@ from .train import METRICS_FIELDS, discounted_advantages, pick_device, save_chec
 SELF_PLAY_METRICS_FIELDS = [*METRICS_FIELDS, "mean_abs_return"]
 
 
-def resolve_parallel_env(spec: dict, mode: str, engine: str | None, time_limit_ticks: int | None):
-    """Construct the game's PettingZoo ``ParallelEnv`` from its GameSpec.
+def resolve_parallel_env(engine: str | None, time_limit_ticks: int | None):
+    """The generic PettingZoo ``ParallelEnv`` over this engine.
 
-    Contract v2 carries ``parallel_env_id``, a ``module:callable`` locator
-    (PettingZoo has no registry like Gymnasium's, so the spec names the
-    factory itself). The factory takes the same keywords the contract fixes
-    for the Gymnasium env — ``mode``, ``engine_source``, ``time_limit_ticks``.
+    Every multi-seat engine has one now — ``lockstep_train`` builds it from
+    the engine's own declaration; there is nothing per-environment to
+    locate. Single-seat engines are refused by the seat-count check in
+    :func:`train_self_play` (there is nobody to self-play against).
     """
-    locator = require_parallel_env_id(spec)
-    module_name, _, attr = locator.partition(":")
     try:
-        module = importlib.import_module(module_name)
+        from lockstep_train.env import LockstepParallelEnv
     except ImportError as e:
         raise SystemExit(
-            f"could not import the parallel env {locator!r}: {e}\n"
-            "The game wheel keeps PettingZoo as an optional extra — install it with:\n"
-            f'  pip install "lockstep-game-{spec["slug"]}[pettingzoo]"'
+            f"could not import lockstep_train's parallel env: {e}\n"
+            'PettingZoo is an optional extra — install it with:\n'
+            '  pip install "lockstep-train[pettingzoo]"'
         ) from e
-    factory = getattr(module, attr)
-    return factory(mode=mode, engine_source=engine, time_limit_ticks=time_limit_ticks)
+    return LockstepParallelEnv(engine_source=engine, time_limit_ticks=time_limit_ticks)
 
 
 def _batch_seats(obs: dict, agents: list[str]) -> dict:
@@ -85,8 +80,6 @@ def _batch_seats(obs: dict, agents: list[str]) -> dict:
 
 
 def train_self_play(
-    spec: dict,
-    mode: str,
     steps: int,
     engine: str | None = None,
     time_limit_ticks: int | None = None,
@@ -110,16 +103,18 @@ def train_self_play(
     as ``num_envs=2`` in the single-seat loop.
     """
     torch.manual_seed(seed)
-    env = resolve_parallel_env(spec, mode, engine, time_limit_ticks)
+    env = resolve_parallel_env(engine, time_limit_ticks)
     agents = list(env.possible_agents)
     num_seats = len(agents)
     if num_seats < 2:
-        raise SystemExit(f"parallel env for {spec['slug']!r} has {num_seats} seat(s); self-play needs 2+")
+        raise SystemExit(
+            f"this engine has {num_seats} seat; self-play needs 2+ — train "
+            "it with plain `task train` instead"
+        )
 
     # One network for every seat — so every seat must see and act in the
-    # same spaces. (The games-side conformance suite already asserts this
-    # equals the Gymnasium env's spaces; checked here anyway, because a
-    # mismatch would otherwise surface as a tensor-shape error mid-rollout.)
+    # same spaces. (Checked here because a mismatch would otherwise surface
+    # as a tensor-shape error mid-rollout.)
     obs_space = env.observation_space(agents[0])
     act_space = env.action_space(agents[0])
     for a in agents[1:]:

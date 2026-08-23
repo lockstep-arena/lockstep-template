@@ -1,12 +1,11 @@
-# Generic training/export stack ONLY — no game packages here. Games install
-# separately (`task setup GAME=<slug>` runs `pip install lockstep-game-<slug>`)
-# and are discovered at runtime through the `lockstep.training_games` entry
-# point; each game wheel pulls lockstep-train (the platform's game-agnostic
-# wasm-stepping host) and carries its own codec + prebuilt agent shells.
+# Generic training/export stack ONLY — there are no per-environment
+# packages, full stop. `task setup` additionally installs `lockstep-train`
+# (the platform's environment-agnostic wasm-stepping host); everything
+# per-environment comes from the CDN release and the engine's own
+# tensor-wire declaration at runtime.
 gymnasium>=1.0
 # The multi-agent API for `task train PARALLEL=1` (both seats learning at
-# once). Game wheels keep it an optional extra; the template's stack carries
-# it so the parallel loop works the moment a game declares a parallel env.
+# once, on any multi-seat environment).
 pettingzoo>=1.24
 numpy>=1.26
 torch>=2.4

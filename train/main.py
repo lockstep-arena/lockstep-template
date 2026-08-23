@@ -1,18 +1,19 @@
 """train -> export -> parity-check -> stage the submittable agent bundle.
 
-One command (``task train`` runs it), for ANY installed game::
+One command (``task train`` runs it), for ANY published environment::
 
-    python -m train.main --game <slug> --steps 8192 --engine out/engine.wasm
+    python -m train.main --env <slug> --steps 8192 --engine out/engine.wasm
 
-The game is discovered through the ``lockstep.training_games`` entry point —
-``pip install lockstep-game-<slug>`` is all it takes for ``--game <slug>``
-to work; this repo names no game. The staged bundle is what the platform
-actually consumes — and what ``lockstep match run`` / ``lockstep agent
-upload`` take directly::
+Nothing here is per-environment: the env, its spaces and its reward come
+from the engine wasm's own tensor-wire declaration (``lockstep_train``
+reads it), and the staged bundle pairs your trained ``policy.onnx`` with
+the GENERIC agent shell ``task engine`` downloaded. The staged bundle is
+what the platform actually consumes — and what ``lockstep match run`` /
+``lockstep agent upload`` take directly::
 
     out/agent-bundle/
       lockstep.toml        declares the `policy` artifact by NAME
-      component.wasm       the mode's prebuilt agent shell (from the wheel)
+      component.wasm       the generic ONNX agent shell (from the release)
       artifacts/policy.onnx
 """
 
@@ -25,7 +26,6 @@ from pathlib import Path
 import torch
 
 from .core import utf8_output
-from .core.discovery import require_parallel_env_id, resolve_game
 from .core.export import export, verify
 from .core.policy import policy_from_signature
 from .core.self_play import train_self_play
@@ -34,22 +34,30 @@ from .core.train import default_num_envs, train
 
 OUT_DIR = Path("out")
 BUNDLE_DIR = OUT_DIR / "agent-bundle"
+SHELL_WASM = OUT_DIR / "agent-onnx.wasm"
+
+
+def engine_identity(engine: Path) -> tuple[str, int]:
+    """(mode, payload_schema_version), read from the ENGINE's own descriptor.
+
+    Never typed by hand and never fetched separately: the wasm you train
+    against is the wasm that knows what it is. ``lockstep_train`` exposes
+    the descriptor on its session handle.
+    """
+    from lockstep_train import Session
+
+    session = Session(engine_source=str(engine))
+    return session.mode, session.payload_schema_version
 
 
 def main() -> None:
     utf8_output()
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "--game",
-        default=None,
-        help="game slug; the matching lockstep-game-<slug> package must be "
-        "installed (task setup GAME=<slug>). Defaults to the one installed "
-        "game when there is exactly one.",
-    )
-    p.add_argument(
-        "--mode",
-        default=None,
-        help="game mode key; defaults to the game's default mode",
+        "--env",
+        required=True,
+        help="environment slug (ENV= on the task line) — the identity the "
+        "staged bundle declares; browse the catalog at https://lockstep.it/arenas",
     )
     p.add_argument(
         "--steps",
@@ -65,6 +73,11 @@ def main() -> None:
         "--engine",
         required=True,
         help="engine wasm: a local path (task engine downloads one) or an https URL",
+    )
+    p.add_argument(
+        "--shell",
+        default=str(SHELL_WASM),
+        help="the generic ONNX agent shell to stage (task engine downloads it)",
     )
     p.add_argument(
         "--resume",
@@ -83,76 +96,29 @@ def main() -> None:
         help="update-pass device (cuda/mps/cpu); default: best available",
     )
     p.add_argument(
-        "--opponent",
-        default=None,
-        help="fill seat 1 with a frozen policy (.onnx path, e.g. a previous "
-        "run's out/agent-bundle/artifacts/policy.onnx) instead of the idle "
-        "baseline — the self-play hook. Only for games whose env has an "
-        "opponent seat to fill; other games refuse with a message",
-    )
-    p.add_argument(
         "--num-envs",
         type=int,
         default=None,
-        help="parallel engine instances for collection; 1 = in-process "
-        f"(debuggable). Default: min(8, cores-2) = {default_num_envs()} here",
+        help=f"parallel engine instances for collection (default {default_num_envs()} "
+        "here; one env pins one core)",
     )
     p.add_argument(
         "--parallel",
         action="store_true",
-        help="self-play with BOTH seats learning at once: one policy trained "
-        "on every seat's experience of the game's PettingZoo parallel env "
-        "(train/core/self_play.py). Only for games that declare one "
-        "(training contract v2, adversarial seats); others refuse with a "
-        "message. Incompatible with --opponent and --num-envs",
+        help="self-play: train BOTH seats at once with one shared policy over "
+        "the generic PettingZoo parallel env (multi-seat engines only)",
     )
     args = p.parse_args()
 
-    spec, spec_module = resolve_game(args.game)
-    mode = args.mode or spec["default_mode"]
-    if mode not in spec["modes"]:
+    if args.parallel and args.num_envs not in (None, 1):
         raise SystemExit(
-            f"game {spec['slug']!r} has no mode {mode!r} "
-            f"(modes: {', '.join(sorted(spec['modes']))})"
+            "--parallel drives ONE parallel env (PettingZoo has no vector "
+            "API; the engine is not the bottleneck) — drop --num-envs"
         )
 
-    if args.parallel:
-        # Pre-flight the contract: the spec says whether the game has a
-        # parallel env at all, so the refusal can name the game up front.
-        require_parallel_env_id(spec)
-        if args.opponent:
-            raise SystemExit(
-                "--parallel and --opponent are different self-play rungs: with "
-                "--parallel seat 1 IS the learning policy, not a frozen one. "
-                "Pick one."
-            )
-        if args.num_envs not in (None, 1):
-            raise SystemExit(
-                "--parallel drives ONE parallel env (PettingZoo has no vector "
-                "API; the engine is not the bottleneck) — drop --num-envs"
-            )
-
-    if args.opponent:
-        # Pre-flight here, where the error can name the game: inside a
-        # spawned env worker this surfaces as a pickled TypeError.
-        import inspect
-
-        import gymnasium
-
-        env_spec = gymnasium.registry.get(spec["env_id"])
-        ctor = env_spec.entry_point
-        if isinstance(ctor, str):
-            module, _, attr = ctor.partition(":")
-            import importlib
-
-            ctor = getattr(importlib.import_module(module), attr)
-        if "opponent" not in inspect.signature(ctor).parameters:
-            raise SystemExit(
-                f"--opponent: {spec['slug']!r} has no opponent seat to fill "
-                "(its env takes no `opponent` option)"
-            )
-
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    engine = Path(args.engine)
+    mode, payload_schema_version = engine_identity(engine)
 
     if args.from_weights:
         print(f"── loading weights {args.from_weights}")
@@ -161,12 +127,10 @@ def main() -> None:
         net.load_state_dict(blob["state_dict"])
     elif args.parallel:
         print(
-            f"── self-play training {spec['slug']} [{mode}] for {args.steps} "
+            f"── self-play training {args.env} [{mode}] for {args.steps} "
             "seat-steps (both seats learning, one shared policy)"
         )
         net = train_self_play(
-            spec=spec,
-            mode=mode,
             steps=args.steps,
             engine=args.engine,
             time_limit_ticks=args.time_limit_ticks,
@@ -176,11 +140,8 @@ def main() -> None:
             resume=args.resume,
         )
     else:
-        print(f"── training {spec['slug']} [{mode}] for {args.steps} steps")
+        print(f"── training {args.env} [{mode}] for {args.steps} steps")
         net = train(
-            spec=spec,
-            spec_module=spec_module,
-            mode=mode,
             steps=args.steps,
             engine=args.engine,
             time_limit_ticks=args.time_limit_ticks,
@@ -189,7 +150,6 @@ def main() -> None:
             device=args.device,
             out_dir=OUT_DIR,
             resume=args.resume,
-            opponent=args.opponent,
         )
         weights = OUT_DIR / "policy.pt"
         torch.save(
@@ -208,7 +168,9 @@ def main() -> None:
     diff = verify(net, onnx)
     print(f"✓ torch/onnxruntime parity: max abs diff {diff:.3e}")
 
-    bundle = stage(spec, mode, onnx, BUNDLE_DIR)
+    bundle = stage(
+        args.env, mode, payload_schema_version, onnx, Path(args.shell), BUNDLE_DIR
+    )
     print(f"→ bundle: {bundle}")
     print("\nRun it:   task match\nCompete:  task upload")
 

@@ -1,17 +1,19 @@
-"""Stage the submittable agent bundle from a GameSpec.
+"""Stage the submittable agent bundle.
 
 The staged bundle is what the platform actually consumes — and what
 ``lockstep match run`` / ``lockstep agent upload`` take directly::
 
     <bundle>/
       lockstep.toml        declares the `policy` artifact by NAME
-      component.wasm       the mode's prebuilt agent shell (from the wheel)
+      component.wasm       the GENERIC ONNX agent shell (task engine fetched it)
       artifacts/policy.onnx
 
-The component is NOT trained here: it is the fixed WASM shell that feeds
-observations to whatever ``policy.onnx`` you put next to it, shipped inside
-the game's training wheel and version-coupled to the observation codec the
-env trains against.
+The component is NOT trained here and is not per-environment either: it is
+the one generic shell every environment shares. It decodes the tensor-wire
+seat-init, feeds each observation tensor to the ONNX graph BY NAME (u8
+images as f32/255, batch dim prepended) and maps the graph's ``action``
+output from [-1, 1] onto the declared action bounds. The environment
+specifics live entirely in ``policy.onnx``'s learned weights.
 """
 
 from __future__ import annotations
@@ -20,22 +22,39 @@ import shutil
 from pathlib import Path
 
 
-def stage(spec: dict, mode: str, onnx: Path, bundle: Path) -> Path:
-    """Write the agent bundle for ``mode`` and return its directory."""
-    payload_schema_version = spec["modes"][mode]["payload_schema_version"]
+def stage(
+    slug: str,
+    mode: str,
+    payload_schema_version: int,
+    onnx: Path,
+    shell_wasm: Path,
+    bundle: Path,
+) -> Path:
+    """Write the agent bundle and return its directory.
+
+    ``payload_schema_version`` is read from the ENGINE (the wasm's own
+    descriptor, via ``lockstep_train``), never typed by hand: the api
+    refuses an agent whose declared version does not match the live
+    environment catalog.
+    """
+    if not shell_wasm.is_file():
+        raise SystemExit(
+            f"no agent shell at {shell_wasm} — run: task engine ENV={slug}"
+        )
     (bundle / "artifacts").mkdir(parents=True, exist_ok=True)
     (bundle / "artifacts/policy.onnx").write_bytes(Path(onnx).read_bytes())
-    shutil.copyfile(spec["agent_component_path"](mode), bundle / "component.wasm")
+    shutil.copyfile(shell_wasm, bundle / "component.wasm")
     (bundle / "lockstep.toml").write_text(
         "# Staged by train/core/stage.py — do not hand-edit.\n"
         "#\n"
         "# `policy` is the artifact NAME the shell passes to `infer()`.\n"
-        "schema_version = 1\n"
-        f'game = "{spec["slug"]}"\n'
-        "# Read from the game package, never typed here: the api refuses an\n"
-        "# agent whose declared version does not match the live game catalog.\n"
+        "schema_version = 2\n"
+        f'environment = "{slug}"\n'
+        "# Read from the engine's own descriptor, never typed here: the api\n"
+        "# refuses an agent whose declared version does not match the live\n"
+        "# environment catalog.\n"
         f"payload_schema_version = {payload_schema_version}\n"
-        "# The ladder this agent targets (games can have more than one mode).\n"
+        "# The ladder this agent targets (environments can have several modes).\n"
         f'mode = "{mode}"\n'
         "\n"
         "[artifacts.policy]\n"
