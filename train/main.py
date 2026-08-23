@@ -25,9 +25,10 @@ from pathlib import Path
 import torch
 
 from .core import utf8_output
-from .core.discovery import resolve_game
+from .core.discovery import parallel_env_id, resolve_game
 from .core.export import export, verify
 from .core.policy import policy_from_signature
+from .core.self_play import train_self_play
 from .core.stage import stage
 from .core.train import default_num_envs, train
 
@@ -96,6 +97,15 @@ def main() -> None:
         help="parallel engine instances for collection; 1 = in-process "
         f"(debuggable). Default: min(8, cores-2) = {default_num_envs()} here",
     )
+    p.add_argument(
+        "--parallel",
+        action="store_true",
+        help="self-play with BOTH seats learning at once: one policy trained "
+        "on every seat's experience of the game's PettingZoo parallel env "
+        "(train/core/self_play.py). Only for games that declare one "
+        "(training contract v2, adversarial seats); others refuse with a "
+        "message. Incompatible with --opponent and --num-envs",
+    )
     args = p.parse_args()
 
     spec, spec_module = resolve_game(args.game)
@@ -105,6 +115,28 @@ def main() -> None:
             f"game {spec['slug']!r} has no mode {mode!r} "
             f"(modes: {', '.join(sorted(spec['modes']))})"
         )
+
+    if args.parallel:
+        # Pre-flight the contract: the spec says whether the game has a
+        # parallel env at all, so the refusal can name the game up front.
+        if not parallel_env_id(spec):
+            raise SystemExit(
+                f"--parallel: {spec['slug']!r} declares no parallel env — its "
+                "seats are not adversarial (training contract "
+                f"v{spec['training_contract_version']}, no parallel_env_id). "
+                "Train one seat with plain `task train`."
+            )
+        if args.opponent:
+            raise SystemExit(
+                "--parallel and --opponent are different self-play rungs: with "
+                "--parallel seat 1 IS the learning policy, not a frozen one. "
+                "Pick one."
+            )
+        if args.num_envs not in (None, 1):
+            raise SystemExit(
+                "--parallel drives ONE parallel env (PettingZoo has no vector "
+                "API; the engine is not the bottleneck) — drop --num-envs"
+            )
 
     if args.opponent:
         # Pre-flight here, where the error can name the game: inside a
@@ -133,6 +165,22 @@ def main() -> None:
         blob = torch.load(args.from_weights, weights_only=True, map_location="cpu")
         net = policy_from_signature(blob["spaces"])
         net.load_state_dict(blob["state_dict"])
+    elif args.parallel:
+        print(
+            f"── self-play training {spec['slug']} [{mode}] for {args.steps} "
+            "seat-steps (both seats learning, one shared policy)"
+        )
+        net = train_self_play(
+            spec=spec,
+            mode=mode,
+            steps=args.steps,
+            engine=args.engine,
+            time_limit_ticks=args.time_limit_ticks,
+            seed=args.seed,
+            device=args.device,
+            out_dir=OUT_DIR,
+            resume=args.resume,
+        )
     else:
         print(f"── training {spec['slug']} [{mode}] for {args.steps} steps")
         net = train(

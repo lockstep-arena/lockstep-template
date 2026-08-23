@@ -4,6 +4,10 @@
 # point; each game wheel pulls lockstep-train (the platform's game-agnostic
 # wasm-stepping host) and carries its own codec + prebuilt agent shells.
 gymnasium>=1.0
+# The multi-agent API for `task train PARALLEL=1` (both seats learning at
+# once). Game wheels keep it an optional extra; the template's stack carries
+# it so the parallel loop works the moment a game declares a parallel env.
+pettingzoo>=1.24
 numpy>=1.26
 torch>=2.4
 onnx>=1.16

@@ -43,8 +43,18 @@ jobs:
       - name: Fetch the game's pinned engine
         run: python -m train.core.engine --game dance-off --out out/engine.wasm
 
-      - name: Template tests (import lint + SAME_STEP autoreset semantics)
+      - name: Template tests (import lint + SAME_STEP autoreset semantics + self-play loop)
         run: python -m pytest tests -q
+
+      - name: PARALLEL=1 refuses a single-agent game by name
+        # dance-off is opponent-blind by design and declares no parallel env
+        # (training contract v1). The pre-flight must say so, not fail deep
+        # inside the loop.
+        run: |
+          if python -m train.main --game dance-off --parallel --steps 64                --engine out/engine.wasm 2> parallel-refusal.txt; then
+            echo "expected --parallel to be refused for dance-off"; exit 1
+          fi
+          grep -q "declares no parallel env" parallel-refusal.txt
 
       - name: Train through the full pipeline (vectorized, spawn workers)
         run: |
