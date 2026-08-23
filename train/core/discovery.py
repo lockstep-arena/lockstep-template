@@ -16,6 +16,13 @@ The spec (training contract v1) carries:
 - ``modes``: per-mode ``payload_schema_version`` (int) + ``engine_url`` (str)
 - ``agent_component_path``: callable(mode) -> Path to the mode's prebuilt
   agent-shell component
+
+Contract v2 adds (additively — a v1 spec is a valid v2 spec):
+
+- ``parallel_env_id``: ``str | None`` — for games whose seats are genuinely
+  adversarial, a ``module:callable`` locator of a PettingZoo ``ParallelEnv``
+  factory where every seat learns at once (``task train PARALLEL=1``; see
+  :mod:`train.core.self_play`). ``None``/absent = single-agent only.
 """
 
 from __future__ import annotations
@@ -25,8 +32,10 @@ from typing import Any
 
 ENTRY_POINT_GROUP = "lockstep.training_games"
 
-#: Training-contract versions this template understands.
-SUPPORTED_CONTRACT_VERSIONS = frozenset({1})
+#: Training-contract versions this template understands. v2 only ADDS the
+#: optional ``parallel_env_id`` key, so accepting both costs nothing — and a
+#: v3 that changes something this loop relies on will be refused here.
+SUPPORTED_CONTRACT_VERSIONS = frozenset({1, 2})
 
 #: Keys a v1 spec must carry (checked so a broken package fails with a
 #: message instead of an AttributeError three modules later).
@@ -93,3 +102,33 @@ def load_game(slug: str) -> tuple[dict[str, Any], str]:
             "(git pull) — or install an older release of the game package."
         )
     return spec, ep.module
+
+
+def parallel_env_id(spec: dict[str, Any]) -> str | None:
+    """The spec's PettingZoo factory locator, or ``None`` for single-agent
+    games (and for every v1 spec, which predates the key)."""
+    return spec.get("parallel_env_id") or None
+
+
+def require_parallel_env_id(spec: dict[str, Any]) -> str:
+    """The locator, or a refusal that says WHICH kind of "none" this is.
+
+    A v1 spec cannot tell a single-agent game from a wheel that predates
+    parallel envs, so it gets the upgrade hint; a v2 spec with ``None`` is
+    a deliberate declaration that the game has no adversarial seats.
+    """
+    locator = parallel_env_id(spec)
+    if locator:
+        return locator
+    slug = spec["slug"]
+    if spec["training_contract_version"] < 2:
+        raise SystemExit(
+            f"--parallel: {slug!r} speaks training contract v1, which has no "
+            "parallel env. Either the game is single-agent, or its wheel predates "
+            f"the parallel env — try: pip install -U lockstep-game-{slug}"
+        )
+    raise SystemExit(
+        f"--parallel: {slug!r} has no parallel env — its seats are not "
+        "adversarial (contract v2, parallel_env_id is None). Train one seat "
+        "with plain `task train`."
+    )

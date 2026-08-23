@@ -87,7 +87,7 @@ the modes, and carries the agent shell.
 |---|---|
 | `task setup` | Creates `.venv`, installs `requirements.txt` (torch + onnx toolchain, no game), then `lockstep-game-<GAME>`. |
 | `task engine` | Downloads the game's pinned engine wasm to `out/engine.wasm` (automatic before train/match; no-op if unchanged). `MODE=` picks a non-default mode's engine. |
-| `task train` | PPO against the real engine → ONNX export → torch/onnxruntime parity check → stages `out/agent-bundle/`. Vars: `STEPS` (default 8192), `MODE` (default: the game's default mode), `NUM_ENVS` (default: `min(8, cores-2)`), `RESUME=1` (continue from `out/checkpoint.pt`). |
+| `task train` | PPO against the real engine → ONNX export → torch/onnxruntime parity check → stages `out/agent-bundle/`. Vars: `STEPS` (default 8192), `MODE` (default: the game's default mode), `NUM_ENVS` (default: `min(8, cores-2)`), `RESUME=1` (continue from `out/checkpoint.pt`), `OPPONENT=<policy.onnx>` (seat 1 = a frozen policy, on games with an opponent seat), `PARALLEL=1` (both seats learn at once — one shared policy over the game's PettingZoo env, on games that declare one; see [`train/core/self_play.py`](train/core/self_play.py)). |
 | `task scripted` | Builds the NON-trained example agent ([`examples/scripted_agent.py`](examples/scripted_agent.py)) → `out/scripted-bundle/`. No RL involved. |
 | `task match` | `lockstep match run` with a bundle in both seats (self-play); writes `out/archive.bin`. Var: `BUNDLE` — a bundle dir (`out/agent-bundle`, `out/scripted-bundle`) or a bare `.wasm` component (the Rust agent). |
 | `task rust-agent` | Builds [`examples/rust-agent/`](examples/rust-agent/) — an agent authored directly in Rust → wasm component, from public contracts only. Needs `rustup target add wasm32-wasip2`. |
@@ -302,20 +302,27 @@ training-metadata contract:
 my-game = "lockstep_my_game.training_spec:game_spec"
 ```
 
-The spec carries `training_contract_version` (this template supports **v1**),
-`slug`, `env_id`, `default_mode`, per-mode `payload_schema_version` +
-`engine_url`, and an `agent_component_path(mode)` callable to the mode's
-prebuilt shell. Loading the entry point registers the Gymnasium env. Contract
-v1 also requires: env constructor kwargs `mode` / `engine_source` /
-`time_limit_ticks`, a `Dict`-of-named-`Box` observation space (uint8 images
-and float32 vectors — `train/core/policy.py` builds one stream per entry),
-spawn-safe env factories, and SAME_STEP autoreset semantics.
+The spec carries `training_contract_version` (this template supports **v1
+and v2**), `slug`, `env_id`, `default_mode`, per-mode
+`payload_schema_version` + `engine_url`, and an `agent_component_path(mode)`
+callable to the mode's prebuilt shell. Loading the entry point registers the
+Gymnasium env. Contract v1 also requires: env constructor kwargs `mode` /
+`engine_source` / `time_limit_ticks`, a `Dict`-of-named-`Box` observation
+space (uint8 images and float32 vectors — `train/core/policy.py` builds one
+stream per entry), spawn-safe env factories, and SAME_STEP autoreset
+semantics.
+
+Contract **v2** adds one optional key, `parallel_env_id` — for games whose
+seats are genuinely adversarial, a `module:callable` locator of a PettingZoo
+`ParallelEnv` factory (same constructor kwargs) where every seat learns at
+once. `task train PARALLEL=1` uses it; a v1 spec is a valid v2 spec, and a
+game without the key simply has no parallel path (the pre-flight says so).
 
 With that in place, `task setup GAME=my-game && task train GAME=my-game` is
 the whole story: the network, ONNX signature and bundle are all derived. The
-contract is expected to widen (new action-space kinds, multiple seats, …);
-each widening bumps the version, and the template refuses versions it does
-not know with an "upgrade the template" message rather than guessing.
+contract is expected to keep widening (new action-space kinds, …); each
+widening bumps the version, and the template refuses versions it does not
+know with an "upgrade the template" message rather than guessing.
 
 ## What's in the box
 
@@ -325,11 +332,12 @@ train/                 the reference pipeline (yours to gut and replace)
     discovery.py       finds installed games via the entry point; contract gate
     policy.py          builds the network FROM the env's spaces (CNN / MLP streams)
     train.py           small self-contained PPO loop; checkpoints + metrics.csv
+    self_play.py       the same PPO over a game's PettingZoo env: both seats learning, one policy (PARALLEL=1)
     export.py          torch.onnx export + torch/onnxruntime parity check
     stage.py           writes the submittable bundle from the GameSpec
     engine.py          fetches the game's pinned engine wasm
   main.py              train → export → parity → stage out/agent-bundle/
-tests/                 the genericity gate + vec-env semantics proof (CI runs these)
+tests/                 the genericity gate + vec-env semantics proof + an engine-free self-play run (CI runs these)
 examples/              dance-off reference-game pedagogy (see TUTORIAL.md)
   scripted_agent.py    the NON-trained agent (part 1 of the tutorial)
   rust-agent/          a pure-Rust wasm agent against the public contract

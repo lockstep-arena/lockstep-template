@@ -27,6 +27,7 @@ and `task setup`.
 - [Part 2 — a trained agent](#part-2--a-trained-agent)
 - [Part 3 — reading a match](#part-3--reading-a-match)
 - [Part 4 — compete](#part-4--compete)
+- [Two seats learning at once](#two-seats-learning-at-once)
 - [Where to go from here](#where-to-go-from-here)
 
 ## Poke the environment first
@@ -284,6 +285,50 @@ task upload AGENT_ID=<id-from-the-first-upload>   # new revision, same agent
 To sanity-check a bundle without credentials:
 `lockstep agent validate --bundle out/agent-bundle`.
 
+## Two seats learning at once
+
+Dance-off has no opponent: dancers score independently, so one seat is the
+whole story. A **duel** is different — in jetpack-joust the score is
+zero-sum (a landed hit is +1 for the attacker and −1 for the victim), and a
+policy trained against a free-falling seat 1 has never met a lance. The
+`OPPONENT=` option (below) freezes a previous export in seat 1; the step
+beyond that is to let BOTH seats learn at the same time:
+
+```sh
+task setup GAME=jetpack-joust          # the wheel's PettingZoo env comes with it
+task train GAME=jetpack-joust PARALLEL=1 STEPS=50000
+```
+
+What changes, and what does not:
+
+- **The env.** The game's wheel declares a PettingZoo `ParallelEnv`
+  (training contract v2, `parallel_env_id`) over the same engine: agents
+  `seat_0` and `seat_1`, each observing from its own frame and acting every
+  tick, rewards = each seat's own score delta (they sum to zero). Per seat it
+  is exactly the Gymnasium env — same observation keys, same action box.
+- **The loop.** [`train/core/self_play.py`](train/core/self_play.py) is the
+  single-seat PPO with one variable changed: ONE network chooses both
+  seats' actions (one batched forward pass), and both seats' transitions go
+  into the same buffer. `STEPS` counts seat-steps, so a duel contributes two
+  per tick. The opponent is never frozen — it is the policy itself, so the
+  curriculum moves with you. League/population play is deliberately not
+  here; this is the first rung.
+- **The artifact.** Unchanged. Competition is one agent per seat answering
+  `on_tick`, so the run still exports ONE `policy.onnx`, through the same
+  parity check, into the same `out/agent-bundle/`. `task match` and `task
+  upload` work as before — PettingZoo is a training-side view only.
+- **Reading the numbers.** In a zero-sum game the pooled `mean_return` is
+  ~0 by construction; the new `mean_abs_return` column in `metrics.csv`
+  (`mean|return|` on the console) is the one that says whether any jousting
+  happened. `episodes=0` for a while is
+  normal: a duel lasts 1800 ticks (`--time-limit-ticks`) and the first
+  rollouts are shorter than that.
+- **What is refused.** `PARALLEL=1` on a game without a parallel env (dance-
+  off — or a jetpack-joust wheel older than 0.2.0, which the message tells
+  you to upgrade) stops before training with a message naming the game; so do
+  `PARALLEL=1` together with `OPPONENT=` (different self-play rungs) or
+  `NUM_ENVS` (there is ONE parallel env; the engine is not the bottleneck).
+
 ## Where to go from here
 
 - **Beat the sway bot** — the real work. Raw steps demonstrably aren't
@@ -306,9 +351,10 @@ To sanity-check a bundle without credentials:
   jetpack-joust, `task train GAME=jetpack-joust
   OPPONENT=out/agent-bundle/artifacts/policy.onnx` fills seat 1 with your
   PREVIOUS export instead of the free-fall baseline — train, re-point
-  OPPONENT at the new bundle, repeat: a poor man's self-play ladder.
-  (dance-off has no opponent seat to fill — dancers score independently,
-  and `task train` says so if you try.)
+  OPPONENT at the new bundle, repeat: a poor man's self-play ladder. The
+  real one is `PARALLEL=1` — [two seats learning at
+  once](#two-seats-learning-at-once). (dance-off has no opponent seat to
+  fill — dancers score independently, and `task train` says so if you try.)
 - **Replace the network**: `train/` is yours. Only the derived ONNX
   signature (obs keys → `action`, enforced by `train/core/export.py`) and
   the bundle layout are load-bearing — see
