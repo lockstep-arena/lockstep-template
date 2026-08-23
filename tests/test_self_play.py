@@ -125,11 +125,17 @@ def test_batch_seats_stacks_in_seat_order():
     assert batched["obs"][0].sum() == 0 and batched["obs"][1].sum() == OBS_LEN
 
 
-def test_spec_without_parallel_env_is_refused():
-    single = {**SPEC, "training_contract_version": 1}
-    del single["parallel_env_id"]
-    with pytest.raises(SystemExit, match="declares no parallel env"):
-        resolve_parallel_env(single, "only", None, None)
+def test_spec_without_parallel_env_is_refused_by_kind():
+    # A v1 spec cannot say whether the game is single-agent or the wheel is
+    # just old, so the refusal carries the upgrade hint.
+    v1 = {**SPEC, "training_contract_version": 1}
+    del v1["parallel_env_id"]
+    with pytest.raises(SystemExit, match="contract v1, which has no parallel env"):
+        resolve_parallel_env(v1, "only", None, None)
+    # A v2 spec with None is a deliberate "no adversarial seats".
+    v2_none = {**SPEC, "parallel_env_id": None}
+    with pytest.raises(SystemExit, match="has no parallel env — its seats are not adversarial"):
+        resolve_parallel_env(v2_none, "only", None, None)
 
 
 def test_resolve_parallel_env_builds_the_factory():

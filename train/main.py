@@ -25,7 +25,7 @@ from pathlib import Path
 import torch
 
 from .core import utf8_output
-from .core.discovery import parallel_env_id, resolve_game
+from .core.discovery import require_parallel_env_id, resolve_game
 from .core.export import export, verify
 from .core.policy import policy_from_signature
 from .core.self_play import train_self_play
@@ -119,13 +119,7 @@ def main() -> None:
     if args.parallel:
         # Pre-flight the contract: the spec says whether the game has a
         # parallel env at all, so the refusal can name the game up front.
-        if not parallel_env_id(spec):
-            raise SystemExit(
-                f"--parallel: {spec['slug']!r} declares no parallel env — its "
-                "seats are not adversarial (training contract "
-                f"v{spec['training_contract_version']}, no parallel_env_id). "
-                "Train one seat with plain `task train`."
-            )
+        require_parallel_env_id(spec)
         if args.opponent:
             raise SystemExit(
                 "--parallel and --opponent are different self-play rungs: with "

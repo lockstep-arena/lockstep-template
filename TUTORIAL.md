@@ -324,7 +324,8 @@ What changes, and what does not:
   normal: a duel lasts 1800 ticks (`--time-limit-ticks`) and the first
   rollouts are shorter than that.
 - **What is refused.** `PARALLEL=1` on a game without a parallel env (dance-
-  off) stops before training with a message naming the game; so do
+  off — or a jetpack-joust wheel older than 0.2.0, which the message tells
+  you to upgrade) stops before training with a message naming the game; so do
   `PARALLEL=1` together with `OPPONENT=` (different self-play rungs) or
   `NUM_ENVS` (there is ONE parallel env; the engine is not the bottleneck).
 

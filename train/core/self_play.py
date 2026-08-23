@@ -43,6 +43,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from .discovery import require_parallel_env_id
 from .policy import Policy, obs_to_tensors
 from .train import METRICS_FIELDS, discounted_advantages, pick_device, save_checkpoint
 
@@ -61,13 +62,7 @@ def resolve_parallel_env(spec: dict, mode: str, engine: str | None, time_limit_t
     factory itself). The factory takes the same keywords the contract fixes
     for the Gymnasium env — ``mode``, ``engine_source``, ``time_limit_ticks``.
     """
-    locator = spec.get("parallel_env_id")
-    if not locator:
-        raise SystemExit(
-            f"game {spec['slug']!r} declares no parallel env — its seats are not "
-            "adversarial, so there is nothing to learn simultaneously. Drop "
-            "--parallel (train one seat with the Gymnasium env)."
-        )
+    locator = require_parallel_env_id(spec)
     module_name, _, attr = locator.partition(":")
     try:
         module = importlib.import_module(module_name)
