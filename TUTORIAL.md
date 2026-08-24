@@ -1,29 +1,22 @@
 # Tutorial: two agents for Dance-Off
 
-A worked example, end to end, with real output — using **Dance-Off**, the
-shipped reference game. (The template itself is game-agnostic: every command
-below takes `GAME=<slug>` and defaults to dance-off; the flow is identical
-for any installed game package.) You'll build **two** agents:
+This walks the whole path twice: first a **non-trained** agent (a
+hand-written policy through the same export/bundle pipeline), then a
+**trained** one. Everything below is real captured output from the commands
+shown. Dance-Off is the default `ENV=`; substitute any slug from
+[lockstep.it/arenas](https://lockstep.it/arenas) and the commands do not
+change.
 
-1. a **non-trained** one — a hand-written policy, no RL, ~30 lines — to see
-   what an agent actually *is*;
-2. a **trained** one — PPO against the real engine, exported to ONNX.
-
-Both go through the identical export → bundle → match pipeline, because to
-the platform an agent is just an ONNX graph with the right signature sitting
-next to the mode's WASM shell. Where the policy came from is your business.
-
-The observation and action types used throughout are documented on the
-[dance-off interface page](https://lockstep.it/games/dance-off/interface?mode=servo-assist).
-
-Everything below assumes you've done the [prerequisites](README.md#prerequisites)
-and `task setup`.
+```sh
+task setup                 # once: venv + training stack
+task engine                # fetch dance-off's current release
+```
 
 ## Contents
 
 - [Poke the environment first](#poke-the-environment-first)
 - [Part 1 — a non-trained agent](#part-1--a-non-trained-agent)
-- [Part 1½ — the same idea in pure Rust](#part-1--the-same-idea-in-pure-rust)
+- [Part 1½ — the same idea in pure Rust](#part-1½--the-same-idea-in-pure-rust)
 - [Part 2 — a trained agent](#part-2--a-trained-agent)
 - [Part 3 — reading a match](#part-3--reading-a-match)
 - [Part 4 — compete](#part-4--compete)
@@ -32,335 +25,192 @@ and `task setup`.
 
 ## Poke the environment first
 
-Before building anything, step the real engine by hand. `task engine`
-downloads it (208 KB of WASM — the same binary ranked matches run), then:
+The engine describes itself — nothing here was typed into the template:
 
 ```python
-import gymnasium
-import lockstep_dance_off  # registers Lockstep/DanceOff-v0
+# .venv/bin/python
+from lockstep_train.env import LockstepEnv
 
-env = gymnasium.make("Lockstep/DanceOff-v0", engine_source="out/engine.wasm")
-obs, info = env.reset(seed=42)
-print("marquee:", obs["marquee"].shape, obs["marquee"].dtype)
-print("agent:  ", obs["agent"].shape, obs["agent"].dtype)
-print("action: ", env.action_space)
-
-total = 0.0
-for _ in range(300):  # 5 seconds of game time
-    obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
-    total += reward
-    if terminated or truncated:
-        break
-print("300 random ticks → total reward:", round(total, 3))
-env.close()
+env = LockstepEnv(engine_source="out/engine.wasm")
+print("observation space:")
+for name, box in env.observation_space.spaces.items():
+    print(f"  {name}: {box.dtype} {box.shape}")
+print("action space:", env.action_space.dtype, env.action_space.shape)
+init = env.seat_init
+print("meta:", dict(init.meta))
+print("action slices:", [(s.name, s.start, s.len) for s in init.actions[0].slices])
 ```
 
-Run it with `.venv/bin/python` and you'll see:
-
 ```
-marquee: (64, 256, 1) uint8
-agent:   (62,) float32
-action:  Box(-1.0, 1.0, (48,), float32)
-300 random ticks → total reward: 0.0
+observation space:
+  agent: float32 (62,)
+  cues: int32 (4, 3)
+  marquee: uint8 (1, 64, 256)
+action space: float32 (48,)
+meta: {'model': 'dance-off', 'task': "hit the routine's poses on the beat", 'mode': 'servo-assist', 'control_hz': '60'}
+action slices: [('joint_targets', 0, 36), ('effort', 36, 12)]
 ```
 
-Three things worth absorbing:
-
-- **The marquee is an image** — the scrolling move cards, host-rasterized,
-  byte-identical to what a submitted agent sees in a ranked match. It is the
-  goal signal: what you're being asked to dance, and how soon.
-- **The agent vector is body state** — root pose, 12 joint quaternions,
-  fallen flag, combo, score, tick (full layout in `lockstep_dance_off.env`
-  and on the [interface page](https://lockstep.it/games/dance-off/interface?mode=servo-assist)).
-- **Random flailing earns exactly zero.** Reward is the per-step score
-  delta, and score comes from hitting move cards with good posture. This
-  game does not pay for enthusiasm.
+A 62-float proprioception vector, the upcoming cue cards as integers, a
+64×256 marquee strip your bot may watch (or ignore), and a 48-float action:
+36 joint rotation targets + 12 effort shares, bounds included. The same
+declaration renders on the environment's
+[Interface page](https://lockstep.it/environments/dance-off/interface).
 
 ## Part 1 — a non-trained agent
 
-[`examples/scripted_agent.py`](examples/scripted_agent.py) is the whole
-thing. The policy is a `torch.nn.Module` with no parameters worth training —
-it ignores the marquee, reads the current tick out of the agent vector, and
-sways two joints on a slow sine at even effort:
-
-```python
-class Sway(nn.Module):
-    # The export seam reads these three attributes — that's the whole
-    # interface between "your policy" and the pipeline:
-    action_len = ACTION_LEN                    # 48: 36 pose + 12 effort shares
-    input_names = ["marquee", "agent"]         # the ONNX signature, by name
-    input_shapes = {"marquee": (1, 64, 256), "agent": (62,)}
-
-    def forward(self, marquee, agent):
-        tick_seconds = agent[:, -1:] / 60.0
-        wave = 0.35 * torch.sin(tick_seconds * 3.0)
-        pose = torch.cat([wave.expand(-1, 2), wave.new_zeros(wave.shape[0], 34)], dim=1)
-        effort = wave.new_full((wave.shape[0], 12), 0.5)
-        return torch.cat([pose, effort], dim=1)
-```
-
-Build and run it:
+`examples/scripted_agent.py` builds the simplest correct ONNX graph — every
+action element at its bounds midpoint (the wire's own "neutral") — and
+stages it exactly like a trained one. The point: the platform does not care
+where your graph came from.
 
 ```sh
 task scripted
-task match BUNDLE=out/scripted-bundle
 ```
 
-The build is instant — it's the same export + parity-check + bundle staging
-the trained path uses, just with nothing to train:
-
 ```
-→ onnx: out/scripted-policy.onnx (1672 bytes)
+→ onnx: out/scripted-policy.onnx (1246 bytes)
 ✓ torch/onnxruntime parity: max abs diff 0.000e+00
 → bundle: out/scripted-bundle
-```
 
-And the match (self-play, seed `0703`, the engine's own 2773-tick routine):
-
-```
-match finished: 2773 frames, final tick 2772, rankings [0, 1], winner Some(0)
-top-score:          137.4
-mean-card-quality:  0.12
-moves-hit:          4
-falls:              0
-mean-posture:       0.99
-```
-
-A 1.6 KB ONNX file that does nothing but stand steady and sway scores **137
-points with zero falls**. Remember that number.
-
-## Part 1½ — the same idea in pure Rust
-
-The sway bot again — but this time with **no Python, no ONNX, no prebuilt
-shell**. [`examples/rust-agent/`](examples/rust-agent/) implements the
-`lockstep:agent` WIT world directly (vendored under its `wit/`) and speaks
-the published FlatBuffers contract (`contract.fbs` — the current one is on the
-game's [Interface tab](https://lockstep.it/games/dance-off/interface),
-vendored at `contract/dance-off.fbs`); `task contract` refreshes the vendored
-copy from the CDN release the engine pin points at. The View is
-read zero-copy — the 16 KB marquee raster is never even touched:
-
-```rust
-fn on_tick(view: Vec<u8>) -> Vec<u8> {
-    let tick = ViewRef::read_as_root(&view).and_then(|v| v.tick()).unwrap_or(0);
-    let wave = 0.35 * libm::sinf(tick as f32 / 60.0 * 3.0);
-    // …two joints sway, even effort, planus-build a ServoInput…
-}
+Run it:   task match ENV=dance-off BUNDLE=out/scripted-bundle
 ```
 
 ```sh
-rustup target add wasm32-wasip2
+task match BUNDLE=out/scripted-bundle
+```
+
+```
+match finished: 2773 frames, final tick 2772, rankings [1, 0], winner Some(1) — archive out/archive.bin (1355981 bytes)
+✓ match archived → out/archive.bin
+```
+
+A full 46-second routine, both seats standing perfectly still, scored by
+the real engine. Open `examples/scripted_agent.py` and make it yours — the
+docstring shows where a closed-form policy plugs in.
+
+## Part 1½ — the same idea in pure Rust
+
+`examples/rust-agent/` is the same no-training bot with the training stack
+deleted: ~150 lines that decode the tensor wire **by hand** (the wire is a
+published one-page spec, and the decoder is pinned by the spec's own golden
+encodings — `cargo test` in that directory) and answer every tick directly.
+On Dance-Off it recognizes the servo declaration and sways; on any other
+environment it plays neutral.
+
+```sh
 task rust-agent
 task match BUNDLE=examples/rust-agent/target/wasm32-wasip2/release/rust_agent.wasm
 ```
 
 ```
-match finished: 2773 frames, rankings [0, 1], winner Some(0)
-top-score:      299.9
-falls:          0
+match finished: 2773 frames, final tick 2772, rankings [0, 1], winner Some(0) — archive out/archive-rust.bin (1355981 bytes)
 ```
 
-A 64 KB component, from public contracts only — and it out-scores both the
-Python sway bot and the smoke-trained policy. Any language that compiles to
-a wasm component can do exactly this from the same `.fbs`.
+No ONNX, no inference host, no dependencies beyond the WIT world — bytes
+in, bytes out.
 
 ## Part 2 — a trained agent
 
 ```sh
-task train STEPS=1024
+task train STEPS=64 NUM_ENVS=1     # tiny — proves the pipeline in ~a minute
 ```
 
-`STEPS=1024` is a smoke-test run (a few seconds of training) so you can watch
-the whole pipeline; the default is 8192, and a real run wants orders of
-magnitude more — but read
-[the reward landscape](README.md#the-reward-landscape-read-before-a-long-run)
-before assuming steps alone will get you a scoring agent. Output:
-
 ```
-── training dance-off [servo-assist] for 1024 steps
-  update device: mps   envs: 8 (DanceOffVectorEnv)
-     1024/1024 steps  episodes=0    mean_return=     nan     2.3s
+── training dance-off [servo-assist] for 64 steps
+  update device: cpu   envs: 1 (SyncVectorEnv)
 → weights: out/policy.pt
-→ onnx: out/policy.onnx (1209048 bytes)
-✓ torch/onnxruntime parity: max abs diff 4.470e-08
+→ onnx: out/policy.onnx (1279116 bytes)
+✓ torch/onnxruntime parity: max abs diff 3.353e-08
 → bundle: out/agent-bundle
 
 Run it:   task match
 Compete:  task upload
 ```
 
-Reading it:
+The network was built from the declaration you poked above: a CNN stream
+for `marquee`, LayerNorm+MLP streams for `agent` and `cues` (the int32
+cards enter the graph as int32 — the cast is part of the export), fused
+into a 48-wide tanh action head. The parity line is the load-bearing one:
+the exported graph and the trained network are held to the same numbers
+under onnxruntime — the exact runtime the platform's inference host uses.
 
-- `envs: 8 (DanceOffVectorEnv)` — collection steps 8 engine instances in
-  parallel. Dance-off ships a NATIVE vector env (engines on Rust threads in
-  this process), so the loop picked it automatically; games without one get
-  the same parallelism from worker processes (`AsyncVectorEnv`), and the
-  update pass runs on the best available accelerator (here Apple MPS)
-  either way. None of it changes what trains — the same policy comes out
-  of a CPU-only box, just slower.
-- `episodes=0`, `mean_return=nan` — 1024 steps across 8 parallel envs is 128
-  ticks each, nowhere near a full episode (the routine runs ~2773 ticks), so
-  no episode ever finished. Expected for a smoke run.
-- Two files the smoke run already produced that matter for real runs:
-  `out/checkpoint.pt` (rewritten atomically every rollout — a crash loses at
-  most one rollout, `task train RESUME=1` continues) and `out/metrics.csv`
-  (one diagnostics row per rollout — see
-  [the README](README.md#watch-a-run-metricscsv) for how to read it).
-- The **parity check** re-runs the exported ONNX under onnxruntime — the
-  exact runtime the platform's inference host uses — and compares against
-  torch. `3.0e-08` means the export IS the network you trained. A real graph
-  difference (a dropped activation, a transposed input) fails loudly here
-  instead of silently shipping a broken agent.
-- The bundle is the submittable artifact:
-
-  ```
-  out/agent-bundle/
-    lockstep.toml          declares the `policy` artifact by name
-    component.wasm         the mode's shell (from the wheel — not trained)
-    artifacts/policy.onnx  your network
-  ```
-
-Now run it:
+For a policy that actually dances, `STEPS=64` becomes millions and
+`NUM_ENVS=8` — see the README's
+[reward landscape](README.md#the-reward-landscape-read-before-a-long-run)
+section first.
 
 ```sh
 task match
 ```
 
 ```
-match finished: 2773 frames, final tick 2772, rankings [0, 1], winner None
-top-score:          0.0
-mean-card-quality:  0.05
-moves-hit:          2
-falls:              13
-mean-posture:       0.84
+match finished: 2773 frames, final tick 2772, rankings [0, 1], winner Some(0) — archive out/archive.bin (1355981 bytes)
 ```
-
-**The 30-second trained agent loses to the sway bot** — 0 points and 13
-falls against 137 and none. That is the honest baseline of this template,
-and it's the right lesson to start from: continuous control is hard, and a
-policy that hasn't learned to stand yet spends the match on the floor. The
-sway bot's score is the number your training run has to beat before it has
-learned anything at all — and beating it takes more than steps: a real
-2M-step run of this exact loop still ended at score 0 (dance-off pays only
-for hitting cards, and random motion never does). What it takes is YOUR
-work on top of honest machinery — see
-[the reward landscape](README.md#the-reward-landscape-read-before-a-long-run)
-for where to start.
 
 ## Part 3 — reading a match
 
-`task match` is a REAL match — `lockstep match run` executes the engine and
-both agent bundles exactly as a ranked match would, then writes
-`out/archive.bin`: a full-frame archive, the same format the platform's
-watch page replays. The metrics block at the end is per-match telemetry:
-
-| Metric | Meaning |
-|---|---|
-| `top-score` / `top-rating` | best seat's score and its rating conversion |
-| `mean-card-quality` | average hit quality across resolved cards (0..1) |
-| `cards-resolved` / `moves-hit` | cards that crossed the line / cards actually hit |
-| `falls` | times a dancer hit the floor |
-| `mean-posture` | average uprightness (1.0 = never wobbled) |
-
-Self-play note: both seats run YOUR bundle, so seat differences are the
-seed, not skill. Local inference uses whatever your machine has
-(CoreML / DirectML / CPU) — timings are indicative; the watch page's
-per-tick charts are authoritative.
+The archive is the whole match, deterministically replayable. Drop
+`out/archive.bin` on <https://lockstep.it/replay> to watch it rendered, or
+read the outcome straight off the CLI output above: final tick, rankings
+by seat, winner. Matches end when the engine says so (the routine's length
+here), never on a wall clock.
 
 ## Part 4 — compete
 
 ```sh
-cp .env.example .env    # then fill in LOCKSTEP_API_KEY
-task upload             # creates the agent, waits for verification
+task upload NAME=my-first-agent
 ```
 
-The platform's verifier re-validates the bundle against the *published*
-engine and, on success, the agent joins its mode's ladder. Later, after more
-training:
-
-```sh
-task upload AGENT_ID=<id-from-the-first-upload>   # new revision, same agent
+```
+uploaded bundle agents/…/8c7b581b54e499ae….wasm (1199629 bytes, sha256 7e1491b8…)
+        mode: "create",
+        verification: "verified",
+        display_name: "my-first-agent",
+        mode_key: "servo-assist",
+        latest_revision_number: 1,
+        latest_revision_status: Verified,
 ```
 
-To sanity-check a bundle without credentials:
-`lockstep agent validate --bundle out/agent-bundle`.
+(Condensed — the CLI prints the full upload record. `verification:
+"verified"` is the line that matters: the platform re-ran your bundle
+against the live engine and accepted it, payload schema and all.)
+
+Your agent joins the arena pool and shows up at
+`lockstep.it/environments/dance-off/your-agents`. Re-upload as a revision
+with `task upload AGENT_ID=<id>`.
+
+If you are here for a **hiring assessment**: this same upload is what you
+seal on your invite page — see the README's
+[assessment recipe](README.md#taking-a-hiring-assessment).
 
 ## Two seats learning at once
 
-Dance-off has no opponent: dancers score independently, so one seat is the
-whole story. A **duel** is different — in jetpack-joust the score is
-zero-sum (a landed hit is +1 for the attacker and −1 for the victim), and a
-policy trained against a free-falling seat 1 has never met a lance. The
-`OPPONENT=` option (below) freezes a previous export in seat 1; the step
-beyond that is to let BOTH seats learn at the same time:
+Dance-Off is a duel: two seats, one winner. Plain `task train` trains seat
+0 while seat 1 plays neutral. `PARALLEL=1` trains BOTH seats with one
+shared policy over the generic PettingZoo view — the classic first rung of
+self-play:
 
 ```sh
-task setup GAME=jetpack-joust          # the wheel's PettingZoo env comes with it
-task train GAME=jetpack-joust PARALLEL=1 STEPS=50000
+task train PARALLEL=1 STEPS=128
 ```
 
-What changes, and what does not:
+```
+── self-play training dance-off [servo-assist] for 128 seat-steps (both seats learning, one shared policy)
+→ onnx: out/policy.onnx (1279116 bytes)
+✓ torch/onnxruntime parity: max abs diff 7.451e-08
+→ bundle: out/agent-bundle
+```
 
-- **The env.** The game's wheel declares a PettingZoo `ParallelEnv`
-  (training contract v2, `parallel_env_id`) over the same engine: agents
-  `seat_0` and `seat_1`, each observing from its own frame and acting every
-  tick, rewards = each seat's own score delta (they sum to zero). Per seat it
-  is exactly the Gymnasium env — same observation keys, same action box.
-- **The loop.** [`train/core/self_play.py`](train/core/self_play.py) is the
-  single-seat PPO with one variable changed: ONE network chooses both
-  seats' actions (one batched forward pass), and both seats' transitions go
-  into the same buffer. `STEPS` counts seat-steps, so a duel contributes two
-  per tick. The opponent is never frozen — it is the policy itself, so the
-  curriculum moves with you. League/population play is deliberately not
-  here; this is the first rung.
-- **The artifact.** Unchanged. Competition is one agent per seat answering
-  `on_tick`, so the run still exports ONE `policy.onnx`, through the same
-  parity check, into the same `out/agent-bundle/`. `task match` and `task
-  upload` work as before — PettingZoo is a training-side view only.
-- **Reading the numbers.** In a zero-sum game the pooled `mean_return` is
-  ~0 by construction; the new `mean_abs_return` column in `metrics.csv`
-  (`mean|return|` on the console) is the one that says whether any jousting
-  happened. `episodes=0` for a while is
-  normal: a duel lasts 1800 ticks (`--time-limit-ticks`) and the first
-  rollouts are shorter than that.
-- **What is refused.** `PARALLEL=1` on a game without a parallel env (dance-
-  off — or a jetpack-joust wheel older than 0.2.0, which the message tells
-  you to upgrade) stops before training with a message naming the game; so do
-  `PARALLEL=1` together with `OPPONENT=` (different self-play rungs) or
-  `NUM_ENVS` (there is ONE parallel env; the engine is not the bottleneck).
+Every seat's transition lands in the same PPO buffer; the exported
+artifact is unchanged (one `policy.onnx`), so `task match` and `task
+upload` work identically.
 
 ## Where to go from here
 
-- **Beat the sway bot** — the real work. Raw steps demonstrably aren't
-  enough on this reward landscape; the promising directions (reward shaping
-  against the match metrics, curriculum, bigger nets, imitation, your own
-  algorithm) are laid out in
-  [the reward landscape](README.md#the-reward-landscape-read-before-a-long-run).
-  The machinery keeps every attempt cheap: crash-safe checkpoints,
-  comparable `metrics.csv` runs, parity-checked bundles.
-- **Bring your own training stack**: the env is standard Gymnasium (works
-  with SB3 / CleanRL / torchrl out of the box) and the export/stage seam
-  takes any policy that answers the derived signature — see
-  [the README](README.md#bring-your-own-training-stack).
-- **Try the research tier**: `task train MODE=raw-torque` — no servo
-  assistance, your policy outputs raw joint torques (action becomes
-  `(36,)`). Its own ladder; a bundle targets exactly one tier. A plain
-  `task match` afterwards does the right thing: the staged bundle records
-  the mode it was trained for, and the match fetches that mode's engine.
-- **Fight a real opponent (games with an adversarial seat)**: on
-  jetpack-joust, `task train GAME=jetpack-joust
-  OPPONENT=out/agent-bundle/artifacts/policy.onnx` fills seat 1 with your
-  PREVIOUS export instead of the free-fall baseline — train, re-point
-  OPPONENT at the new bundle, repeat: a poor man's self-play ladder. The
-  real one is `PARALLEL=1` — [two seats learning at
-  once](#two-seats-learning-at-once). (dance-off has no opponent seat to
-  fill — dancers score independently, and `task train` says so if you try.)
-- **Replace the network**: `train/` is yours. Only the derived ONNX
-  signature (obs keys → `action`, enforced by `train/core/export.py`) and
-  the bundle layout are load-bearing — see
-  [the contract](README.md#the-contract) and the
-  [interface page](https://lockstep.it/games/dance-off/interface?mode=servo-assist)
-  for the types.
-- **Get smarter than a sine wave without RL**: `examples/scripted_agent.py`
-  never looks at the marquee. A scripted policy that *reads the cards* is a
-  perfectly legitimate agent — and a stronger baseline than you'd guess.
+- Swap the training loop for your own stack — the env is plain
+  `gymnasium.make("Lockstep/Env-v0", engine_source=...)`; the README's
+  [BYO section](README.md#bring-your-own-training-stack) is the seam.
+- Try a robot: `task train ENV=panda-pick` — same commands, a MuJoCo arm.
+- Read the wire spec and write an agent in your favorite language —
+  `examples/rust-agent/` is the worked example.

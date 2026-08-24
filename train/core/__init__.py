@@ -1,10 +1,11 @@
-"""Game-agnostic training core.
+"""Environment-agnostic training core.
 
-Everything in here is parameterized by a discovered GameSpec (see
-:mod:`train.core.discovery`) and the env's own Gymnasium spaces. Importing a
-game package from this package is forbidden — games are reached ONLY through
-entry-point discovery, which is what lets one template train every installed
-game without ever naming one.
+Everything in here is parameterized by the engine wasm's own tensor-wire
+declaration (surfaced as Gymnasium spaces by ``lockstep_train``) and the
+CDN release metadata (see :mod:`train.core.discovery`). There are no
+per-environment packages to import — naming an environment anywhere in this
+package is forbidden, which is what lets one template train every published
+environment without ever naming one.
 """
 
 from __future__ import annotations

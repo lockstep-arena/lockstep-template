@@ -3,9 +3,9 @@ package lockstep:inference@0.1.0;
 /// Wraps the [`inference`] interface in a host-only world. The
 /// platform's wasm-runtime targets this world with `bindgen!` to
 /// generate one canonical Rust module of inference types + a Host
-/// trait. Every per-game player bindgen uses a `with:` directive to
+/// trait. Every per-environment agent bindgen uses a `with:` directive to
 /// point at this same module so a single Host impl handles every
-/// game's inference calls.
+/// environment's inference calls.
 ///
 /// Guests should NOT target this world — it exists for the HOST. Agents
 /// target `lockstep:agent`'s `agent` world, which imports the [`inference`]
@@ -13,9 +13,9 @@ package lockstep:inference@0.1.0;
 /// platform sets up).
 ///
 /// That used to read "agents implement their game's `player-<role>` world".
-/// Those worlds are gone: per-game player WITs died when payloads became
+/// Those worlds are gone: per-environment player WITs died when payloads became
 /// opaque bytes, and `world agent` was then split out of `lockstep:engine`
-/// into its own package. There is now ONE agent world, shared by every game.
+/// into its own package. There is now ONE agent world, shared by every environment.
 world host {
     import inference;
 }
@@ -28,7 +28,7 @@ world host {
 /// EVERY agent gets it: `lockstep:agent`'s `agent` world imports this
 /// unconditionally and the host always installs it on the linker, so there is
 /// nothing for an agent to opt into. An agent shipping a hand-written policy
-/// simply never calls `infer`. (There is no per-game opt-in any more — games
+/// simply never calls `infer`. (There is no per-environment opt-in any more — environments
 /// no longer author player WITs of their own.)
 ///
 /// The `artifact` argument is a name declared in the agent bundle's
