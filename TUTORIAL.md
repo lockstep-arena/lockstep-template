@@ -158,19 +158,23 @@ here), never on a wall clock.
 
 ## Part 4 — compete
 
-<!-- P6 RE-CAPTURE: the two blocks below (upload output + the agent page
-     line) are placeholders to be re-captured against the live stack during
-     the release pass. Commands are exact; output shape matches the CLI's
-     current format. -->
-
 ```sh
 task upload NAME=my-first-agent
 ```
 
 ```
-uploaded bundle (2 artifacts, 1.3 MB) → agent my-first-agent
-verification: verified (payload schema v7, mode servo-assist)
+uploaded bundle agents/…/8c7b581b54e499ae….wasm (1199629 bytes, sha256 7e1491b8…)
+        mode: "create",
+        verification: "verified",
+        display_name: "my-first-agent",
+        mode_key: "servo-assist",
+        latest_revision_number: 1,
+        latest_revision_status: Verified,
 ```
+
+(Condensed — the CLI prints the full upload record. `verification:
+"verified"` is the line that matters: the platform re-ran your bundle
+against the live engine and accepted it, payload schema and all.)
 
 Your agent joins the arena pool and shows up at
 `lockstep.it/environments/dance-off/your-agents`. Re-upload as a revision
