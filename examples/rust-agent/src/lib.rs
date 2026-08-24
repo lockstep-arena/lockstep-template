@@ -61,25 +61,21 @@ mod component {
                 return; // no plan → empty inputs → engine plays us neutral
             };
             let neutral = init.actions.iter().map(wire::neutral_bytes).collect();
-            let sway = init
-                .actions
-                .iter()
-                .enumerate()
-                .find_map(|(i, spec)| {
-                    // Recognized from the declaration alone — nothing here
-                    // names a version or imports a schema.
-                    if init.meta("model") != Some("dance-off") {
-                        return None;
-                    }
-                    let jt = spec.slice("joint_targets")?;
-                    let effort = spec.slice("effort")?;
-                    Some(Sway {
-                        action_index: i,
-                        spec: spec.clone(),
-                        joint_targets: (jt.start as usize, jt.len as usize),
-                        effort: (effort.start as usize, effort.len as usize),
-                    })
-                });
+            let sway = init.actions.iter().enumerate().find_map(|(i, spec)| {
+                // Recognized from the declaration alone — nothing here
+                // names a version or imports a schema.
+                if init.meta("model") != Some("dance-off") {
+                    return None;
+                }
+                let jt = spec.slice("joint_targets")?;
+                let effort = spec.slice("effort")?;
+                Some(Sway {
+                    action_index: i,
+                    spec: spec.clone(),
+                    joint_targets: (jt.start as usize, jt.len as usize),
+                    effort: (effort.start as usize, effort.len as usize),
+                })
+            });
             *PLAN.lock().unwrap() = Some(Plan { neutral, sway });
         }
 

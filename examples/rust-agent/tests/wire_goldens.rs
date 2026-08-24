@@ -2,7 +2,7 @@
 //! (`tests/fixtures/*.bin`, vendored from the public lockstep-interface
 //! repo). If these pass, the decoder speaks the same wire as every engine.
 
-use rust_agent::wire::{Dtype, SeatInit, View, encode_input, f32_bytes};
+use rust_agent::wire::{encode_input, f32_bytes, Dtype, SeatInit, View};
 
 const SEAT_INIT: &[u8] = include_bytes!("fixtures/seat_init.bin");
 const VIEW: &[u8] = include_bytes!("fixtures/view.bin");
@@ -22,7 +22,10 @@ fn seat_init_golden_decodes() {
     assert_eq!(init.obs[1].dtype, Dtype::F32);
     // Per-element bounds override the scalars where declared.
     assert_eq!(init.obs[1].bounds_at(2), (-10.0, 10.0));
-    assert_eq!(init.obs[1].slice("joint_pos").map(|s| (s.start, s.len)), Some((0, 2)));
+    assert_eq!(
+        init.obs[1].slice("joint_pos").map(|s| (s.start, s.len)),
+        Some((0, 2))
+    );
 
     let action = init.action("action").expect("f32 action tensor");
     assert_eq!(action.dtype, Dtype::F32);
@@ -46,8 +49,10 @@ fn view_golden_decodes_zero_copy() {
     assert_eq!(view.tensors.len(), 2);
     assert_eq!(view.tensors[0], [0u8, 1, 2, 3, 4, 5, 6, 255]);
     let agent: Vec<f32> = view.tensors[1]
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
         .collect();
     assert_eq!(agent, [0.5, -0.5, 1.25, -1.25, 0.75]);
 }
@@ -55,9 +60,6 @@ fn view_golden_decodes_zero_copy() {
 #[test]
 fn input_golden_reencodes_byte_for_byte() {
     // The golden input carries action = [0.25, -0.75, 1.0], mode = [2i32].
-    let encoded = encode_input(&[
-        f32_bytes(&[0.25, -0.75, 1.0]),
-        2i32.to_le_bytes().to_vec(),
-    ]);
+    let encoded = encode_input(&[f32_bytes(&[0.25, -0.75, 1.0]), 2i32.to_le_bytes().to_vec()]);
     assert_eq!(encoded, INPUT, "hand encoder must match the golden bytes");
 }

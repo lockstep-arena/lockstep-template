@@ -114,7 +114,11 @@ pub struct TensorSpec {
 
 impl TensorSpec {
     pub fn numel(&self) -> usize {
-        self.shape.iter().map(|&d| d as usize).product::<usize>().max(1)
+        self.shape
+            .iter()
+            .map(|&d| d as usize)
+            .product::<usize>()
+            .max(1)
     }
 
     pub fn byte_len(&self) -> usize {
@@ -201,9 +205,13 @@ impl SeatInit {
         }
         let seat = r.u32()?;
         let n_obs = r.u32()? as usize;
-        let obs = (0..n_obs).map(|_| TensorSpec::parse(&mut r)).collect::<Result<_>>()?;
+        let obs = (0..n_obs)
+            .map(|_| TensorSpec::parse(&mut r))
+            .collect::<Result<_>>()?;
         let n_act = r.u32()? as usize;
-        let actions = (0..n_act).map(|_| TensorSpec::parse(&mut r)).collect::<Result<_>>()?;
+        let actions = (0..n_act)
+            .map(|_| TensorSpec::parse(&mut r))
+            .collect::<Result<_>>()?;
         let n_meta = r.u32()? as usize;
         let meta = (0..n_meta)
             .map(|_| Ok((r.str_()?, r.str_()?)))
