@@ -40,7 +40,7 @@ jobs:
       - name: Install the training stack
         run: |
           pip install -r requirements.txt
-          pip install "lockstep-train[pettingzoo]>=0.3" pytest
+          pip install "lockstep-train[pettingzoo]>=0.3.3" pytest
 
       - name: Hermetic template tests (import lint, discovery vs a mock CDN, stage, network/export)
         run: python -m pytest tests -q
