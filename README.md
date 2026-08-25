@@ -196,8 +196,12 @@ task upload AGENT_ID=<id-from-the-first-upload>
 task engine ENV=dance-off VERSION=0.6.0
 ```
 
-`latest.json` on the CDN names the current release; `VERSION=` pins an
-older one (its engine, its shell). The staged bundle declares the payload
+The platform API names the current release (its directory on the CDN is
+unguessable, so the path is never derived from the slug); `VERSION=` asserts
+that release's version rather than selecting an older one. For an
+assessment-only environment the API answers only invited candidates — put
+your key in `.env` as `LOCKSTEP_API_KEY` (the same one `task upload` uses)
+before `task engine`. The staged bundle declares the payload
 schema version read from the engine itself, so the api will refuse a stale
 bundle rather than let it misread observations.
 
@@ -225,9 +229,9 @@ task engine ENV=go1-beacon    # resolve + fetch its current release
 task train  ENV=go1-beacon    # the network is built from ITS declaration
 ```
 
-`train/core/discovery.py` resolves `environments/<slug>/latest.json` on the
-CDN (base overridable via `LOCKSTEP_CDN_URL`); the engine's tensor-wire
-declaration does the rest. The catalog lives at
+`train/core/discovery.py` resolves the release through the platform API
+(`LOCKSTEP_API_URL`; artifacts then come from the CDN, `LOCKSTEP_CDN_URL`);
+the engine's tensor-wire declaration does the rest. The catalog lives at
 [lockstep.it/arenas](https://lockstep.it/arenas); each environment's
 Interface page renders the same declaration this template trains from.
 

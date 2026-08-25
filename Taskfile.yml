@@ -31,7 +31,7 @@ tasks:
       # The one Lockstep dependency. LOCKSTEP_TRAIN_SPEC overrides the PyPI
       # spec for local development against a checkout/wheel — e.g.
       #   task setup LOCKSTEP_TRAIN_SPEC="-e ../LOCKSTEP-PLATFORM/packages/mixed/lockstep-train[pettingzoo]"
-      - '"{{.VENV}}/bin/pip" install {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train[pettingzoo]>=0.3\""}}'
+      - '"{{.VENV}}/bin/pip" install {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train[pettingzoo]>=0.3.3\""}}'
       - 'echo "✓ setup complete — next: task engine ENV=<slug> (default dance-off), then task train"'
 
   engine:
