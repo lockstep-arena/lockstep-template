@@ -2,8 +2,8 @@
 //! private dependencies, for ANY environment.
 //!
 //! Everything it consumes is public: the `lockstep:agent` WIT world
-//! (vendored under `wit/`) and the tensor-wire SPEC (`docs/wire.md` in the
-//! public lockstep-interface repo), re-implemented by hand in `src/wire.rs`
+//! (vendored under `wit/`) and the tensor-wire SPEC (`docs/wire.md`, vendored into
+//! this template from the platform's normative copy), re-implemented by hand in `src/wire.rs`
 //! — no codegen, no schema files, no reference crate. Compare
 //! `examples/scripted_agent.py`: same idea, but instead of riding the
 //! generic ONNX shell this IS the component — bytes in, bytes out, no

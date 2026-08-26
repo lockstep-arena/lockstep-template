@@ -31,8 +31,9 @@ tasks:
       # The one Lockstep dependency. LOCKSTEP_TRAIN_SPEC overrides the PyPI
       # spec for local development against a checkout/wheel — e.g.
       #   task setup LOCKSTEP_TRAIN_SPEC="-e ../LOCKSTEP-PLATFORM/packages/mixed/lockstep-train[pettingzoo]"
-      - '"{{.VENV}}/bin/pip" install {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train[pettingzoo]>=0.3.3\""}}'
-      - 'echo "✓ setup complete — next: task engine ENV=<slug> (default dance-off), then task train"'
+      - '"{{.VENV}}/bin/pip" install {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train[pettingzoo]>=0.4.0\""}}'
+      - 'echo "setup: ready — {{.ENV}}"'
+      - 'echo "next: task info ENV={{.ENV}} (what the environment is), then task train ENV={{.ENV}} — or task quickstart ENV={{.ENV}} for the whole loop in one go"'
 
   engine:
     desc: "Download the release's engine.wasm + the generic agent shell (no-op if unchanged). ENV= MODE= VERSION="
@@ -41,6 +42,40 @@ tasks:
       # the generic ONNX agent shell are fetched from the same release
       # directory. `.url` stamps make re-runs and ENV/MODE switches cheap.
       - '"{{.PY}}" -m train.core.engine --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} {{if .VERSION}}--version "{{.VERSION}}"{{end}} --out out'
+
+  info:
+    desc: "Print the environment's brief and wire layout in the terminal — goal, reward, what ends an episode, every tensor and slice with units, the budgets — from the engine you will train against. ENV= MODE= (the same page as the Interface tab)"
+    deps: [engine]
+    cmds:
+      # Runs the fetched engine for one reset and prints what THAT engine
+      # declares, so what you read is exactly what `task train` builds
+      # against. `--env` (the platform's record) is the no-download
+      # alternative: python -m lockstep_train.info --env <slug>.
+      - '"{{.PY}}" -m lockstep_train.info --engine out/engine.wasm'
+
+  doctor:
+    desc: "Check this machine for everything the template needs — Python version, the venv, lockstep-train, the lockstep CLI, Task, LOCKSTEP_API_KEY, the Rust toolchain for the example agent — and say exactly what is missing and how to fix it."
+    cmds:
+      # Deliberately runs on the SYSTEM python: the venv is one of the
+      # things it checks, so it cannot depend on it.
+      - python3 -m train.doctor
+
+  quickstart:
+    desc: "Zero decisions: setup → fetch the engine → build the scripted agent → run a real local match → hand you the archive to drop on lockstep.it/replay. ENV="
+    cmds:
+      - task: setup
+        vars: { ENV: "{{.ENV}}" }
+      - task: engine
+        vars: { ENV: "{{.ENV}}" }
+      - task: scripted
+        vars: { ENV: "{{.ENV}}" }
+      - task: match
+        vars: { ENV: "{{.ENV}}", BUNDLE: "out/scripted-bundle" }
+      - 'echo ""'
+      - 'echo "quickstart: done — out/archive.bin is a real {{.ENV}} match with the scripted agent in every seat."'
+      - 'echo "Watch it:   drop out/archive.bin on https://lockstep.it/replay"'
+      - 'echo "Read it:    task info ENV={{.ENV}}   (the brief and the wire, in this terminal)"'
+      - 'echo "Train one:  task train ENV={{.ENV}}  then task match ENV={{.ENV}}, then task upload ENV={{.ENV}}"'
 
   train:
     desc: "PPO → ONNX → parity check → stage out/agent-bundle. ENV= MODE= STEPS=8192 NUM_ENVS=(cores-2, max 8) RESUME=1 to continue a crashed run. PARALLEL=1 trains BOTH seats at once (one shared policy over the generic PettingZoo env) on multi-seat environments"

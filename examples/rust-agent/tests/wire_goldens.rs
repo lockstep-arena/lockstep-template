@@ -1,6 +1,6 @@
 //! The hand-written decoder against the SPEC's published golden encodings
-//! (`tests/fixtures/*.bin`, vendored from the public lockstep-interface
-//! repo). If these pass, the decoder speaks the same wire as every engine.
+//! (`tests/fixtures/*.bin`, vendored alongside `docs/wire.md` from the
+//! platform's interface repo). If these pass, the decoder speaks the same wire as every engine.
 
 use rust_agent::wire::{encode_input, f32_bytes, Dtype, SeatInit, View};
 
@@ -25,6 +25,20 @@ fn seat_init_golden_decodes() {
     assert_eq!(
         init.obs[1].slice("joint_pos").map(|s| (s.start, s.len)),
         Some((0, 2))
+    );
+    // The documentation channel rides the same bytes.
+    assert_eq!(
+        init.obs[0].doc,
+        "a 2×4 grayscale strip, one channel, top row first"
+    );
+    assert_eq!(
+        init.obs[1].slice("joint_vel").map(|s| s.unit.as_str()),
+        Some("rad/s")
+    );
+    assert_eq!(init.brief.goal, "Hold the pose the cue asks for.");
+    assert_eq!(
+        init.brief.ends,
+        "After 5 ticks, or the moment the body falls."
     );
 
     let action = init.action("action").expect("f32 action tensor");
