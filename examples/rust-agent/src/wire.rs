@@ -1,8 +1,8 @@
 //! A HAND-WRITTEN tensor-wire (v1) reader/writer — the whole point.
 //!
 //! The wire is a *spec*, not a library: this file re-implements it from the
-//! published document (`docs/wire.md` in the public lockstep-interface
-//! repo) in ~200 lines, with no dependency on the reference crate. If you
+//! published document (`docs/wire.md` in this template — the vendored copy
+//! of the platform's normative spec) in ~200 lines, with no dependency on the reference crate. If you
 //! are porting an agent to Go, Zig or C, this file is the shape of what you
 //! will write. The goldens under `tests/fixtures/` (published with the
 //! spec) pin it: `cargo test` decodes and re-encodes them byte-for-byte.
@@ -10,6 +10,9 @@
 //! Encoding rules (the short version — the spec is normative):
 //! - everything little-endian; `f32` is IEEE-754 binary32
 //! - `str` = `u16` length + UTF-8 bytes, no terminator
+//! - every tensor and slice carries a `doc` string (slices a `unit` too),
+//!   and the seat-init ends with the goal / reward / ends brief — the
+//!   environment documents itself; decoders that don't care skip the strings
 //! - a tensor's bytes are row-major, `dtype size × product(shape)` exactly
 //! - `dtype`: 0 = f32 (4 B), 1 = u8 (1 B), 2 = i32 (4 B)
 //! - tensors appear in DECLARED order with exact byte lengths
@@ -96,6 +99,10 @@ impl Dtype {
 #[derive(Clone, Debug)]
 pub struct Slice {
     pub name: String,
+    /// What this run of elements IS, in the engine's words.
+    pub doc: String,
+    /// Physical unit (`"m"`, `"rad/s"`); empty when dimensionless.
+    pub unit: String,
     pub start: u32,
     pub len: u32,
 }
@@ -103,6 +110,8 @@ pub struct Slice {
 #[derive(Clone, Debug)]
 pub struct TensorSpec {
     pub name: String,
+    /// What this tensor is (and, for rank ≥ 2, what rows/columns mean).
+    pub doc: String,
     pub dtype: Dtype,
     pub shape: Vec<u32>,
     pub low: f32,
@@ -153,6 +162,7 @@ impl TensorSpec {
 
     fn parse(r: &mut Reader) -> Result<Self> {
         let name = r.str_()?;
+        let doc = r.str_()?;
         let dtype = Dtype::parse(r.u8()?)?;
         let rank = r.u8()? as usize;
         let shape: Vec<u32> = (0..rank).map(|_| r.u32()).collect::<Result<_>>()?;
@@ -171,6 +181,8 @@ impl TensorSpec {
             .map(|_| {
                 Ok(Slice {
                     name: r.str_()?,
+                    doc: r.str_()?,
+                    unit: r.str_()?,
                     start: r.u32()?,
                     len: r.u32()?,
                 })
@@ -178,6 +190,7 @@ impl TensorSpec {
             .collect::<Result<_>>()?;
         Ok(Self {
             name,
+            doc,
             dtype,
             shape,
             low,
@@ -188,12 +201,22 @@ impl TensorSpec {
     }
 }
 
+/// The seat's brief — goal, reward, episode end — in the engine's words.
+/// Print it when your agent starts: it is the environment's own README.
+#[derive(Debug, Default)]
+pub struct Brief {
+    pub goal: String,
+    pub reward: String,
+    pub ends: String,
+}
+
 #[derive(Debug)]
 pub struct SeatInit {
     pub seat: u32,
     pub obs: Vec<TensorSpec>,
     pub actions: Vec<TensorSpec>,
     pub meta: Vec<(String, String)>,
+    pub brief: Brief,
 }
 
 impl SeatInit {
@@ -216,11 +239,17 @@ impl SeatInit {
         let meta = (0..n_meta)
             .map(|_| Ok((r.str_()?, r.str_()?)))
             .collect::<Result<_>>()?;
+        let brief = Brief {
+            goal: r.str_()?,
+            reward: r.str_()?,
+            ends: r.str_()?,
+        };
         Ok(Self {
             seat,
             obs,
             actions,
             meta,
+            brief,
         })
     }
 

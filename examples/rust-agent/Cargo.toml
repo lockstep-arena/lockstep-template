@@ -1,6 +1,6 @@
 # A tensor-wire agent in pure Rust → wasm32-wasip2, built from PUBLIC
 # artifacts only: the agent WIT world (vendored under wit/) and the tensor
-# wire SPEC (docs/wire.md in the public lockstep-interface repo) —
+# wire SPEC (docs/wire.md, vendored into this template) —
 # re-implemented by hand in src/wire.rs, no codegen, no schema files.
 # `cargo test` (host) pins the decoder against the spec's published golden
 # encodings under tests/fixtures/.
