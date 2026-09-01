@@ -100,5 +100,5 @@ jobs:
               assert m["schema_version"] == 2 and m["environment"] == "dance-off", (name, m)
               has_policy = "artifacts" in m and "policy" in m.get("artifacts", {})
               assert has_policy == (kind == "onnx"), (name, m)
-              print(f"bundle ok: {name} → {m['environment']} [{m['mode']}] psv {m['payload_schema_version']}")
+              print(f"bundle ok: {name} -> {m['environment']} [{m['mode']}] psv {m['payload_schema_version']}")
           PY
