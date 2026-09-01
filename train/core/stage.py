@@ -5,7 +5,7 @@ The staged bundle is what the platform actually consumes — and what
 
     <bundle>/
       lockstep.toml        declares the `policy` artifact by NAME
-      component.wasm       the GENERIC ONNX agent shell (task engine fetched it)
+      component.wasm       the GENERIC ONNX agent shell (from the cached release)
       artifacts/policy.onnx
 
 The component is NOT trained here and is not per-environment either: it is
@@ -39,7 +39,7 @@ def stage(
     """
     if not shell_wasm.is_file():
         raise SystemExit(
-            f"no agent shell at {shell_wasm} — run: task engine ENV={slug}"
+            f"no agent shell at {shell_wasm} — any engine-using task refetches it (task info ENV={slug})"
         )
     (bundle / "artifacts").mkdir(parents=True, exist_ok=True)
     (bundle / "artifacts/policy.onnx").write_bytes(Path(onnx).read_bytes())

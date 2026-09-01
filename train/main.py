@@ -18,7 +18,7 @@ under ``out/cache/<env>/<mode>/`` — see ``train.core.engine``). The staged bun
 what the platform actually consumes — and what ``lockstep match run`` /
 ``lockstep agent upload`` take directly::
 
-    out/agent-bundle/
+    agents/<name>/out/bundle/
       lockstep.toml        declares the `policy` artifact by NAME
       component.wasm       the generic ONNX agent shell (from the release)
       artifacts/policy.onnx

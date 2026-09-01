@@ -101,7 +101,7 @@ def make_env_factory(
     resolve the id. Closing over plain strings keeps it picklable.
 
     There is no mode parameter: an engine wasm IS one mode, so the mode was
-    chosen when ``task engine`` picked which file to download. Multi-seat
+    chosen when the keyed cache resolved which engine to fetch. Multi-seat
     engines are driven on seat 0 with every other seat playing the wire's
     neutral action — the documented single-agent view of a duel.
     """
