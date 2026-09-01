@@ -2,7 +2,7 @@
 //! (`tests/fixtures/*.bin`, vendored alongside `docs/wire.md` from the
 //! platform's interface repo). If these pass, the decoder speaks the same wire as every engine.
 
-use rust_agent::wire::{encode_input, f32_bytes, Dtype, SeatInit, View};
+use lockstep_wire_reference::wire::{encode_input, f32_bytes, Dtype, SeatInit, View};
 
 const SEAT_INIT: &[u8] = include_bytes!("fixtures/seat_init.bin");
 const VIEW: &[u8] = include_bytes!("fixtures/view.bin");

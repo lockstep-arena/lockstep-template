@@ -1,8 +1,14 @@
 """train -> export -> parity-check -> stage the submittable agent bundle.
 
-One command (``task train`` runs it), for ANY published environment::
+One command (``task train AGENT=<name>`` runs it), for ANY published
+environment::
 
-    python -m train.main --env <slug> --steps 8192
+    python -m train.main --agent <name> --steps 8192
+
+The agent's ``agent.toml`` (written by ``task create-agent``) names the
+environment and mode, so the right engine is resolved from the keyed cache
+and a mode mismatch is impossible. Checkpoints, the exported ONNX and the
+staged bundle all land under ``agents/<name>/out/``.
 
 Nothing here is per-environment: the env, its spaces and its reward come
 from the engine wasm's own declaration (``lockstep_train``
@@ -54,10 +60,15 @@ def main() -> None:
     utf8_output()
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
+        "--agent",
+        default=None,
+        help="agent name (AGENT= on the task line): env/mode come from its "
+        "agent.toml and outputs land in agents/<name>/out/",
+    )
+    p.add_argument(
         "--env",
-        required=True,
-        help="environment slug (ENV= on the task line) — the identity the "
-        "staged bundle declares; browse the catalog at https://lockstep.it/arenas",
+        default=None,
+        help="environment slug — only without --agent; outputs land in out/",
     )
     p.add_argument(
         "--steps",
@@ -128,7 +139,22 @@ def main() -> None:
             "API; the engine is not the bottleneck) — drop --num-envs"
         )
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    if args.agent or not args.env:
+        from .agents import resolve_agent
+
+        cfg = resolve_agent(args.agent)
+        if cfg.lang != "python":
+            raise SystemExit(
+                f"agent {cfg.name} is written in {cfg.lang} — training is the "
+                f"python path; build it instead: task build AGENT={cfg.name}"
+            )
+        env_slug, env_mode = cfg.env, args.mode or cfg.mode
+        out_dir, bundle_dir = cfg.out_dir, cfg.bundle_dir
+    else:
+        env_slug, env_mode = args.env, args.mode
+        out_dir, bundle_dir = OUT_DIR, BUNDLE_DIR
+
+    out_dir.mkdir(parents=True, exist_ok=True)
     if args.engine:
         engine, shell = Path(args.engine), Path(args.shell or "")
         if not args.shell:
@@ -136,7 +162,7 @@ def main() -> None:
     else:
         from .core.engine import ensure_engine
 
-        paths = ensure_engine(args.env, args.mode, args.version)
+        paths = ensure_engine(env_slug, env_mode, args.version)
         engine, shell = paths.engine, paths.shell
     mode, payload_schema_version = engine_identity(engine)
 
@@ -147,7 +173,7 @@ def main() -> None:
         net.load_state_dict(blob["state_dict"])
     elif args.parallel:
         print(
-            f"── self-play training {args.env} [{mode}] for {args.steps} "
+            f"── self-play training {env_slug} [{mode}] for {args.steps} "
             "seat-steps (both seats learning, one shared policy)"
         )
         net = train_self_play(
@@ -156,11 +182,11 @@ def main() -> None:
             time_limit_ticks=args.time_limit_ticks,
             seed=args.seed,
             device=args.device,
-            out_dir=OUT_DIR,
+            out_dir=out_dir,
             resume=args.resume,
         )
     else:
-        print(f"── training {args.env} [{mode}] for {args.steps} steps")
+        print(f"── training {env_slug} [{mode}] for {args.steps} steps")
         net = train(
             steps=args.steps,
             engine=str(engine),
@@ -168,10 +194,10 @@ def main() -> None:
             num_envs=args.num_envs,
             seed=args.seed,
             device=args.device,
-            out_dir=OUT_DIR,
+            out_dir=out_dir,
             resume=args.resume,
         )
-        weights = OUT_DIR / "policy.pt"
+        weights = out_dir / "policy.pt"
         torch.save(
             {
                 "action_len": net.action_len,
@@ -182,13 +208,13 @@ def main() -> None:
         )
         print(f"→ weights: {weights}")
 
-    onnx = export(net, OUT_DIR / "policy.onnx")
+    onnx = export(net, out_dir / "policy.onnx")
     print(f"→ onnx: {onnx} ({onnx.stat().st_size} bytes)")
 
     diff = verify(net, onnx)
     print(f"✓ torch/onnxruntime parity: max abs diff {diff:.3e}")
 
-    bundle = stage(args.env, mode, payload_schema_version, onnx, shell, BUNDLE_DIR)
+    bundle = stage(env_slug, mode, payload_schema_version, onnx, shell, bundle_dir)
     print(f"→ bundle: {bundle}")
     print("\nRun it:   task match\nCompete:  task upload")
 

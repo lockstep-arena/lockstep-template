@@ -1,0 +1,13 @@
+# The template's hand-written Lockstep-wire reference: the exact wire.rs
+# `task create-agent LANG=rust` vendors into every Rust agent, tested here
+# (natively) against the spec's published golden encodings under
+# tests/fixtures/. The C twin lives in ../c-wire, tested by `task test`
+# against the same fixtures.
+[package]
+name = "lockstep-wire-reference"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"

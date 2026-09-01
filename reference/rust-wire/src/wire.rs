@@ -320,14 +320,16 @@ pub fn f32_bytes(values: &[f32]) -> Vec<u8> {
 }
 
 /// The neutral raw bytes for ANY action spec — what "do nothing" means.
+/// `u8`/`i32` round the midpoint (the spec's rule), so an i32 with bounds
+/// 0..=3 is neutral at 2, matching the reference implementation.
 pub fn neutral_bytes(spec: &ValueSpec) -> Vec<u8> {
     match spec.dtype {
         Dtype::F32 => f32_bytes(&spec.neutral_f32()),
         Dtype::I32 => spec
             .neutral_f32()
             .iter()
-            .flat_map(|v| (*v as i32).to_le_bytes())
+            .flat_map(|v| (v.round() as i32).to_le_bytes())
             .collect(),
-        Dtype::U8 => spec.neutral_f32().iter().map(|v| *v as u8).collect(),
+        Dtype::U8 => spec.neutral_f32().iter().map(|v| v.round() as u8).collect(),
     }
 }

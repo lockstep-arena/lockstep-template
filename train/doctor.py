@@ -8,9 +8,11 @@ third-party imports, because the venv is one of the things it checks.
     python3 -m train.doctor --json     # the same report as JSON, for tooling
 
 Required: Python >= 3.11, Task, the lockstep CLI, the venv with
-lockstep-train installed. Optional (reported, never fatal): LOCKSTEP_API_KEY
-(only `task upload` needs it), the Rust toolchain + wasm32-wasip2 target
-(only the Rust example agent needs it), a fetched engine (`task engine`).
+lockstep-train installed. Per-language toolchains are REQUIRED exactly when
+an agent of that language exists under agents/ (else reported as optional):
+rust = cargo + the wasm32-wasip2 target; c = wasi-sdk + wit-bindgen.
+Optional always: LOCKSTEP_API_KEY (only `task upload` needs it), the keyed
+engine cache (filled on demand).
 """
 
 from __future__ import annotations
@@ -134,16 +136,37 @@ def check_api_key() -> Check:
     )
 
 
-def check_rust() -> Check:
+def _agent_langs() -> set[str]:
+    """Languages of the agents that actually exist (drives which toolchains
+    are REQUIRED). Read directly — no third-party imports here."""
+    import tomllib
+
+    langs: set[str] = set()
+    agents = ROOT / "agents"
+    if agents.is_dir():
+        for toml in agents.glob("*/agent.toml"):
+            try:
+                langs.add(tomllib.loads(toml.read_text()).get("agent", {}).get("lang", "python"))
+            except (OSError, tomllib.TOMLDecodeError):
+                continue
+    return langs
+
+
+def check_rust(required: bool) -> Check:
+    why = (
+        "a rust agent exists under agents/"
+        if required
+        else "only needed for LANG=rust agents"
+    )
     cargo = shutil.which("cargo")
     rustup = shutil.which("rustup")
     if not cargo:
         return Check(
             "Rust toolchain",
             False,
-            False,
-            "not installed — only the pure-Rust example agent needs it",
-            "https://rustup.rs then: rustup target add wasm32-wasip2",
+            required,
+            f"not installed — {why}",
+            "task setup LANGS=rust   (or https://rustup.rs then: rustup target add wasm32-wasip2)",
         )
     if rustup:
         _, out = _run([rustup, "target", "list", "--installed"])
@@ -151,12 +174,39 @@ def check_rust() -> Check:
             return Check(
                 "Rust toolchain",
                 False,
-                False,
-                "cargo present, wasm32-wasip2 target missing — only the Rust example agent needs it",
-                "rustup target add wasm32-wasip2",
+                required,
+                f"cargo present, wasm32-wasip2 target missing — {why}",
+                "task setup LANGS=rust   (runs: rustup target add wasm32-wasip2)",
             )
     _, out = _run([cargo, "--version"])
-    return Check("Rust toolchain", True, False, f"{out or 'present'}, wasm32-wasip2 installed")
+    return Check("Rust toolchain", True, required, f"{out or 'present'}, wasm32-wasip2 installed")
+
+
+def check_c(required: bool) -> Check:
+    # train.toolchain has the one detection order (env → /opt/wasi-sdk →
+    # repo-local cache); reuse it rather than encoding it twice.
+    sys.path.insert(0, str(ROOT))
+    try:
+        from train.toolchain import WASI_SDK_VERSION, find_wasi_sdk, find_wit_bindgen
+    finally:
+        sys.path.pop(0)
+
+    why = "a c agent exists under agents/" if required else "only needed for LANG=c agents"
+    sdk = find_wasi_sdk()
+    wb = find_wit_bindgen()
+    if sdk is None or wb is None:
+        missing = " + ".join(
+            n for n, present in (("wasi-sdk", sdk), ("wit-bindgen", wb)) if not present
+        )
+        return Check(
+            "C toolchain",
+            False,
+            required,
+            f"{missing} missing — {why}",
+            f"task setup LANGS=c   (detects /opt/wasi-sdk or $WASI_SDK, else downloads "
+            f"wasi-sdk {WASI_SDK_VERSION} into out/toolchains/)",
+        )
+    return Check("C toolchain", True, required, f"wasi-sdk at {sdk}; wit-bindgen at {wb}")
 
 
 def check_engine() -> Check:
@@ -176,13 +226,15 @@ def check_engine() -> Check:
 
 
 def run() -> list[Check]:
+    langs = _agent_langs()
     return [
         check_python(),
         check_task(),
         check_cli(),
         check_venv(),
         check_api_key(),
-        check_rust(),
+        check_rust(required="rust" in langs),
+        check_c(required="c" in langs),
         check_engine(),
     ]
 
