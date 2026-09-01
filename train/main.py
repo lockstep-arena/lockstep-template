@@ -2,12 +2,13 @@
 
 One command (``task train`` runs it), for ANY published environment::
 
-    python -m train.main --env <slug> --steps 8192 --engine out/engine.wasm
+    python -m train.main --env <slug> --steps 8192
 
 Nothing here is per-environment: the env, its spaces and its reward come
 from the engine wasm's own declaration (``lockstep_train``
 reads it), and the staged bundle pairs your trained ``policy.onnx`` with
-the GENERIC agent shell ``task engine`` downloaded. The staged bundle is
+the GENERIC agent shell fetched from the same release (the keyed cache
+under ``out/cache/<env>/<mode>/`` — see ``train.core.engine``). The staged bundle is
 what the platform actually consumes — and what ``lockstep match run`` /
 ``lockstep agent upload`` take directly::
 
@@ -34,7 +35,6 @@ from .core.train import default_num_envs, train
 
 OUT_DIR = Path("out")
 BUNDLE_DIR = OUT_DIR / "agent-bundle"
-SHELL_WASM = OUT_DIR / "agent-onnx.wasm"
 
 
 def engine_identity(engine: Path) -> tuple[str, int]:
@@ -70,14 +70,26 @@ def main() -> None:
     p.add_argument("--time-limit-ticks", type=int, default=1800)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument(
+        "--mode",
+        default=None,
+        help="mode key (MODE= on the task line); default the release's default_mode",
+    )
+    p.add_argument(
+        "--version",
+        default=None,
+        help="release version assertion; default the published release",
+    )
+    p.add_argument(
         "--engine",
-        required=True,
-        help="engine wasm: a local path (task engine downloads one) or an https URL",
+        default=None,
+        help="override: a local engine wasm path (default: the keyed cache "
+        "fetches this env/mode's released engine)",
     )
     p.add_argument(
         "--shell",
-        default=str(SHELL_WASM),
-        help="the generic ONNX agent shell to stage (task engine downloads it)",
+        default=None,
+        help="override: the generic ONNX agent shell to stage (default: from "
+        "the same cached release as the engine)",
     )
     p.add_argument(
         "--resume",
@@ -117,7 +129,15 @@ def main() -> None:
         )
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    engine = Path(args.engine)
+    if args.engine:
+        engine, shell = Path(args.engine), Path(args.shell or "")
+        if not args.shell:
+            raise SystemExit("--engine override needs --shell too (the staged bundle ships it)")
+    else:
+        from .core.engine import ensure_engine
+
+        paths = ensure_engine(args.env, args.mode, args.version)
+        engine, shell = paths.engine, paths.shell
     mode, payload_schema_version = engine_identity(engine)
 
     if args.from_weights:
@@ -132,7 +152,7 @@ def main() -> None:
         )
         net = train_self_play(
             steps=args.steps,
-            engine=args.engine,
+            engine=str(engine),
             time_limit_ticks=args.time_limit_ticks,
             seed=args.seed,
             device=args.device,
@@ -143,7 +163,7 @@ def main() -> None:
         print(f"── training {args.env} [{mode}] for {args.steps} steps")
         net = train(
             steps=args.steps,
-            engine=args.engine,
+            engine=str(engine),
             time_limit_ticks=args.time_limit_ticks,
             num_envs=args.num_envs,
             seed=args.seed,
@@ -168,9 +188,7 @@ def main() -> None:
     diff = verify(net, onnx)
     print(f"✓ torch/onnxruntime parity: max abs diff {diff:.3e}")
 
-    bundle = stage(
-        args.env, mode, payload_schema_version, onnx, Path(args.shell), BUNDLE_DIR
-    )
+    bundle = stage(args.env, mode, payload_schema_version, onnx, shell, BUNDLE_DIR)
     print(f"→ bundle: {bundle}")
     print("\nRun it:   task match\nCompete:  task upload")
 

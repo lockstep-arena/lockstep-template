@@ -39,9 +39,10 @@ import torch
 import torch.nn as nn
 
 from train.core import utf8_output
+from train.core.engine import ensure_engine
 from train.core.export import export, verify
 from train.core.stage import stage
-from train.main import OUT_DIR, SHELL_WASM, engine_identity
+from train.main import OUT_DIR, engine_identity
 
 BUNDLE = OUT_DIR / "scripted-bundle"
 
@@ -97,13 +98,19 @@ def main() -> None:
     utf8_output()
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--env", required=True, help="environment slug (ENV= on the task line)")
-    p.add_argument("--engine", default=str(OUT_DIR / "engine.wasm"))
-    p.add_argument("--shell", default=str(SHELL_WASM))
+    p.add_argument("--mode", default=None, help="mode key (MODE= on the task line)")
+    p.add_argument("--engine", default=None, help="override: local engine wasm path")
+    p.add_argument("--shell", default=None, help="override: local agent shell path")
     args = p.parse_args()
 
-    engine = Path(args.engine)
-    if not engine.is_file():
-        raise SystemExit(f"no engine at {engine} — run: task engine ENV={args.env}")
+    if args.engine:
+        engine = Path(args.engine)
+        shell = Path(args.shell) if args.shell else None
+        if shell is None:
+            raise SystemExit("--engine override needs --shell too")
+    else:
+        paths = ensure_engine(args.env, args.mode)
+        engine, shell = paths.engine, paths.shell
     mode, payload_schema_version = engine_identity(engine)
     shapes, dtypes, action_len = graph_signature(engine)
 
@@ -112,7 +119,7 @@ def main() -> None:
     print(f"→ onnx: {onnx} ({onnx.stat().st_size} bytes)")
     diff = verify(net, onnx)
     print(f"✓ torch/onnxruntime parity: max abs diff {diff:.3e}")
-    bundle = stage(args.env, mode, payload_schema_version, onnx, Path(args.shell), BUNDLE)
+    bundle = stage(args.env, mode, payload_schema_version, onnx, shell, BUNDLE)
     print(f"→ bundle: {bundle}")
     print(f"\nRun it:   task match ENV={args.env} BUNDLE=out/scripted-bundle")
 

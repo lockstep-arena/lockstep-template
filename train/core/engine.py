@@ -1,21 +1,29 @@
-"""Fetch an environment's released artifacts (``task engine`` runs this).
+"""Lazily fetch an environment's released artifacts into a keyed cache.
 
-Downloads BOTH halves of the agent story next to each other::
+Nothing runs this by hand any more — every task that needs an engine
+(``info``, ``train``, ``build``, ``match``, ``create-agent``) resolves it
+through :func:`ensure_engine`, which downloads BOTH halves of the agent
+story into a cache keyed by (environment, mode)::
 
-    out/engine.wasm       the mode's engine — what you train against
-    out/agent-onnx.wasm   the generic ONNX agent shell — what you ship
+    out/cache/<env>/<mode>/engine.wasm       the mode's engine — what you train against
+    out/cache/<env>/<mode>/agent-onnx.wasm   the generic ONNX agent shell — what you ship
 
 The shell is generic across every environment (it reads the Lockstep-wire
 declaration and binds ONNX inputs by name), but it is versioned WITH the
 release, so it is fetched from the same release directory rather than
-pinned here. Each file gets a ``.url`` stamp so switching ``ENV``/``MODE``
-re-downloads and unchanged re-runs are no-ops.
+pinned here. Each file gets a ``.url`` stamp so unchanged re-runs are
+no-ops, and the keyed layout means switching ``ENV``/``MODE`` can never
+silently replace an engine another task just fetched — the old
+single-slot ``out/engine.wasm`` footgun (a mode switch played out as an
+agent reading garbage) is structurally gone.
 
-Usage::
+CLI (used by the Taskfile to hand paths to non-Python consumers)::
 
-    python -m train.core.engine --env <slug> [--version V] [--mode M] --out out
+    python -m train.core.engine --env <slug> [--version V] [--mode M] --print-path
     python -m train.core.engine --env <slug> --print-url
-    python -m train.core.engine --env <slug> --bundle out/agent-bundle --out out
+
+Progress goes to stderr; ``--print-path``/``--print-url`` write exactly
+one path/URL to stdout.
 """
 
 from __future__ import annotations
@@ -25,10 +33,27 @@ import sys
 import tomllib
 import urllib.request
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import utf8_output
 from .discovery import EnvRelease, resolve
+
+#: Root of the keyed engine cache (repo-relative, gitignored with out/).
+CACHE_ROOT = Path("out/cache")
+
+
+@dataclass(frozen=True)
+class EnginePaths:
+    """One (environment, mode) release, cached locally."""
+
+    env: str
+    mode: str
+    version: str
+    #: ``out/cache/<env>/<mode>/engine.wasm``
+    engine: Path
+    #: ``out/cache/<env>/<mode>/agent-onnx.wasm`` — the generic shell.
+    shell: Path
 
 
 def bundle_manifest(bundle: Path) -> dict | None:
@@ -55,7 +80,7 @@ def resolve_mode(slug: str, mode: str | None, bundle: Path | None) -> str | None
     mode the bundle's manifest says it was staged for, else the release
     default (``None`` here → :func:`train.core.discovery.resolve` decides).
 
-    A match of bundle-vs-engine across modes does not fail cleanly — it
+    A mismatch of bundle-vs-engine across modes does not fail cleanly — it
     plays out as an agent that can't decode a single observation — so a
     disagreement between an explicit ``--mode`` and the bundle's declared
     mode is an error here, where it can still say what to do about it."""
@@ -66,14 +91,14 @@ def resolve_mode(slug: str, mode: str | None, bundle: Path | None) -> str | None
     if bundle_env and bundle_env != slug:
         raise SystemExit(
             f"bundle {bundle} was staged for environment {bundle_env!r}, not "
-            f"{slug!r} — retrain (task train ENV={slug}) or pass the right ENV="
+            f"{slug!r} — rebuild it for {slug!r} or pass the right ENV="
         )
     bundle_mode = manifest.get("mode")
     if mode and bundle_mode and mode != bundle_mode:
         raise SystemExit(
             f"bundle {bundle} was staged for mode {bundle_mode!r} but "
             f"MODE={mode} was asked for — drop MODE= to use the bundle's "
-            f"own mode, or retrain with MODE={mode}"
+            f"own mode, or rebuild for MODE={mode}"
         )
     return mode or bundle_mode
 
@@ -95,7 +120,9 @@ def fetch_file(url: str, out: Path) -> bool:
 
 
 def fetch_release(release: EnvRelease, out_dir: Path) -> dict[str, Path]:
-    """Engine + generic agent shell into ``out_dir``; ``{name: path}``."""
+    """Engine + generic agent shell into ``out_dir``; ``{name: path}``.
+
+    Progress goes to stderr so callers can capture stdout cleanly."""
     written = {}
     for name, url in (
         ("engine.wasm", release.engine_url),
@@ -103,11 +130,44 @@ def fetch_release(release: EnvRelease, out_dir: Path) -> dict[str, Path]:
     ):
         path = out_dir / name
         if fetch_file(url, path):
-            print(f"→ {path}  ({url})")
+            print(f"→ {path}  ({url})", file=sys.stderr)
         else:
-            print(f"✓ {path} up to date")
+            print(f"✓ {path} up to date", file=sys.stderr)
         written[name] = path
     return written
+
+
+def ensure_engine(
+    env: str,
+    mode: str | None = None,
+    version: str | None = None,
+    bundle: Path | None = None,
+    cache_root: Path = CACHE_ROOT,
+) -> EnginePaths:
+    """THE way to get an engine: resolve (env, mode) → fetch into the keyed
+    cache (no-op when the stamps say it's current) → return the paths.
+
+    ``bundle`` lets a staged bundle's own ``lockstep.toml`` pick the mode
+    (see :func:`resolve_mode`); ``version`` is an assertion against the
+    published release, not a selector."""
+    resolved_mode = resolve_mode(env, mode, bundle)
+    release = resolve(env, version, resolved_mode)
+    cache_dir = cache_root / release.slug / release.mode
+    files = fetch_release(release, cache_dir)
+    return EnginePaths(
+        env=release.slug,
+        mode=release.mode,
+        version=release.version,
+        engine=files["engine.wasm"],
+        shell=files["agent-onnx.wasm"],
+    )
+
+
+def cached_engines(cache_root: Path = CACHE_ROOT) -> list[Path]:
+    """Every ``engine.wasm`` in the cache (for doctor / tests), sorted."""
+    if not cache_root.is_dir():
+        return []
+    return sorted(cache_root.glob("*/*/engine.wasm"))
 
 
 def main() -> None:
@@ -123,7 +183,16 @@ def main() -> None:
         "mode when --mode is not given; a bare .wasm is fine and picks "
         "nothing",
     )
-    p.add_argument("--out", default="out", help="output DIRECTORY")
+    p.add_argument(
+        "--print-path",
+        action="store_true",
+        help="fetch (if needed) and print the cached engine.wasm path on stdout",
+    )
+    p.add_argument(
+        "--print-shell",
+        action="store_true",
+        help="fetch (if needed) and print the cached agent-onnx.wasm path on stdout",
+    )
     p.add_argument(
         "--print-url",
         action="store_true",
@@ -131,12 +200,20 @@ def main() -> None:
     )
     args = p.parse_args()
 
-    mode = resolve_mode(args.env, args.mode or None, Path(args.bundle) if args.bundle else None)
-    release = resolve(args.env, args.version, mode)
     if args.print_url:
-        print(release.engine_url)
+        mode = resolve_mode(args.env, args.mode or None, Path(args.bundle) if args.bundle else None)
+        print(resolve(args.env, args.version, mode).engine_url)
         return
-    fetch_release(release, Path(args.out))
+    paths = ensure_engine(
+        args.env,
+        args.mode or None,
+        args.version or None,
+        Path(args.bundle) if args.bundle else None,
+    )
+    if args.print_path:
+        print(paths.engine)
+    if args.print_shell:
+        print(paths.shell)
 
 
 if __name__ == "__main__":

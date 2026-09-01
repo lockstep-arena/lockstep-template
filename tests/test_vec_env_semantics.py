@@ -1,7 +1,8 @@
 """The template's own env-semantics proof, against a REAL engine.
 
-Needs an engine wasm: ``out/engine.wasm`` (``task engine``) or
-``LOCKSTEP_TEST_ENGINE=<path>`` — CI and the local e2e provide one. Nothing
+Needs an engine wasm: anything in the keyed cache (``out/cache/…`` — any
+task that needs an engine fills it) or ``LOCKSTEP_TEST_ENGINE=<path>`` —
+CI and the local e2e provide one. Nothing
 per-environment: the env is the generic ``Lockstep/Env-v0``.
 
 The SAME_STEP check is the load-bearing one: the loop stores every
@@ -26,11 +27,17 @@ import pytest
 
 from train.core.train import make_env_factory, make_vec_env
 
-ENGINE = Path(os.environ.get("LOCKSTEP_TEST_ENGINE", "out/engine.wasm"))
+def _default_engine() -> str:
+    cached = sorted(Path("out/cache").glob("*/*/engine.wasm"))
+    return str(cached[0]) if cached else "out/cache/<env>/<mode>/engine.wasm"
+
+
+ENGINE = Path(os.environ.get("LOCKSTEP_TEST_ENGINE") or _default_engine())
 
 pytestmark = pytest.mark.skipif(
     not ENGINE.is_file(),
-    reason=f"no engine at {ENGINE} — run: task engine (or set LOCKSTEP_TEST_ENGINE)",
+    reason=f"no engine at {ENGINE} — run: task info ENV=<slug> (or set LOCKSTEP_TEST_ENGINE)",
+
 )
 
 

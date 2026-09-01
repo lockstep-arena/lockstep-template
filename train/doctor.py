@@ -160,17 +160,18 @@ def check_rust() -> Check:
 
 
 def check_engine() -> Check:
-    engine = ROOT / "out" / "engine.wasm"
-    if engine.exists():
-        stamp = engine.with_suffix(".wasm.url")
-        where = stamp.read_text().strip() if stamp.exists() else "unknown origin"
-        return Check("engine", True, False, f"out/engine.wasm present ({where})")
+    cache = ROOT / "out" / "cache"
+    engines = sorted(cache.glob("*/*/engine.wasm")) if cache.is_dir() else []
+    if engines:
+        keys = ", ".join(f"{e.parent.parent.name}/{e.parent.name}" for e in engines)
+        return Check("engine cache", True, False, f"out/cache holds: {keys}")
     return Check(
-        "engine",
+        "engine cache",
         False,
         False,
-        "no out/engine.wasm yet — fetched on demand by task info / train / match",
-        "task engine ENV=<slug>",
+        "no cached engines yet — every task that needs one (info / train / "
+        "build / match) fetches it on demand",
+        "nothing to run by hand; task info ENV=<slug> warms the cache",
     )
 
 

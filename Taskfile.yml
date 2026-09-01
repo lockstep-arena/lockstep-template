@@ -35,23 +35,18 @@ tasks:
       - 'echo "setup: ready — {{.ENV}}"'
       - 'echo "next: task info ENV={{.ENV}} (what the environment is), then task train ENV={{.ENV}} — or task quickstart ENV={{.ENV}} for the whole loop in one go"'
 
-  engine:
-    desc: "Download the release's engine.wasm + the generic agent shell (no-op if unchanged). ENV= MODE= VERSION="
-    cmds:
-      # `latest.json` on the CDN names the current release; the engine and
-      # the generic ONNX agent shell are fetched from the same release
-      # directory. `.url` stamps make re-runs and ENV/MODE switches cheap.
-      - '"{{.PY}}" -m train.core.engine --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} {{if .VERSION}}--version "{{.VERSION}}"{{end}} --out out'
-
   info:
     desc: "Print the environment's brief and wire layout in the terminal — goal, reward, what ends an episode, every value and slice with units, the budgets — from the engine you will train against. ENV= MODE= (the same page as the Interface tab)"
-    deps: [engine]
     cmds:
-      # Runs the fetched engine for one reset and prints what THAT engine
-      # declares, so what you read is exactly what `task train` builds
-      # against. `--env` (the platform's record) is the no-download
-      # alternative: python -m lockstep_train.info --env <slug>.
-      - '"{{.PY}}" -m lockstep_train.info --engine out/engine.wasm'
+      # Lazily fetches this env/mode's engine into the keyed cache
+      # (out/cache/<env>/<mode>/ — no-op when current), then runs THAT
+      # engine for one reset and prints what it declares, so what you read
+      # is exactly what `task train` builds against. `--env` (the
+      # platform's record) is the no-download alternative:
+      # python -m lockstep_train.info --env <slug>.
+      - |
+        ENGINE="$("{{.PY}}" -m train.core.engine --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} {{if .VERSION}}--version "{{.VERSION}}"{{end}} --print-path)"
+        "{{.PY}}" -m lockstep_train.info --engine "$ENGINE"
 
   doctor:
     desc: "Check this machine for everything the template needs — Python version, the venv, lockstep-train, the lockstep CLI, Task, LOCKSTEP_API_KEY, the Rust toolchain for the example agent — and say exactly what is missing and how to fix it."
@@ -61,11 +56,9 @@ tasks:
       - python3 -m train.doctor
 
   quickstart:
-    desc: "Zero decisions: setup → fetch the engine → build the scripted agent → run a real local match → hand you the archive to drop on lockstep.it/replay. ENV="
+    desc: "Zero decisions: setup → build the scripted agent (the engine is fetched on demand) → run a real local match → hand you the archive to drop on lockstep.it/replay. ENV="
     cmds:
       - task: setup
-        vars: { ENV: "{{.ENV}}" }
-      - task: engine
         vars: { ENV: "{{.ENV}}" }
       - task: scripted
         vars: { ENV: "{{.ENV}}" }
@@ -79,23 +72,22 @@ tasks:
 
   train:
     desc: "PPO → ONNX → parity check → stage out/agent-bundle. ENV= MODE= STEPS=8192 NUM_ENVS=(cores-2, max 8) RESUME=1 to continue a crashed run. PARALLEL=1 trains BOTH seats at once (one shared policy over the generic PettingZoo env) on multi-seat environments"
-    deps: [engine]
     vars:
       STEPS: '{{.STEPS | default "8192"}}'
     cmds:
+      # The engine + generic shell come from the keyed cache
+      # (out/cache/<env>/<mode>/), fetched on demand inside train.main.
       - >-
         "{{.PY}}" -m train.main --env "{{.ENV}}" --steps {{.STEPS}}
+        {{if .MODE}}--mode "{{.MODE}}"{{end}}
         {{if .NUM_ENVS}}--num-envs {{.NUM_ENVS}}{{end}}
         {{if .RESUME}}--resume{{end}}
         {{if .PARALLEL}}--parallel{{end}}
-        --engine out/engine.wasm
-        --shell out/agent-onnx.wasm
 
   scripted:
     desc: "Build the NON-trained example agent (examples/scripted_agent.py) → out/scripted-bundle. ENV="
-    deps: [engine]
     cmds:
-      - '"{{.PY}}" -m examples.scripted_agent --env "{{.ENV}}"'
+      - '"{{.PY}}" -m examples.scripted_agent --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}}'
 
   rust-agent:
     desc: "Build the pure-Rust example agent → a bare wasm component (needs rustup target add wasm32-wasip2)."
@@ -114,17 +106,17 @@ tasks:
       - sh: test -f {{.BUNDLE}}/lockstep.toml || test -f {{.BUNDLE}}
         msg: "nothing at {{.BUNDLE}} — `task train`, `task scripted`, or `task rust-agent` first"
     cmds:
-      # NOT the plain `engine` dep: that fetches the DEFAULT mode's engine
-      # when MODE= is unset, silently replacing the one `task train MODE=x`
-      # downloaded — and a mode-mismatched match doesn't fail, it plays out
-      # as an agent that can't read a single observation. --bundle lets the
-      # bundle's own lockstep.toml pick the engine instead.
-      - '"{{.PY}}" -m train.core.engine --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} --bundle "{{.BUNDLE}}" --out out'
+      # The bundle's own lockstep.toml picks the mode (--bundle), and the
+      # keyed cache (out/cache/<env>/<mode>/) means fetching one mode's
+      # engine can never replace another's — the old single-slot
+      # mode-mismatch footgun (an agent that can't read a single
+      # observation) is structurally impossible.
       # --clamp-seats: both seats are this bundle; a solo environment clamps
       # to its single seat, a duel keeps two.
       - |
+        ENGINE="$("{{.PY}}" -m train.core.engine --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} --bundle "{{.BUNDLE}}" --print-path)"
         lockstep match run --slug "{{.ENV}}" \
-          --engine out/engine.wasm \
+          --engine "$ENGINE" \
           --agents {{.BUNDLE}} {{.BUNDLE}} \
           --clamp-seats \
           --seed-hex 0703 \
@@ -155,7 +147,7 @@ tasks:
         fi
 
   test:
-    desc: "Run the template's own tests. Hermetic ones always run; engine-backed ones (SAME_STEP semantics) need out/engine.wasm (task engine) or LOCKSTEP_TEST_ENGINE=<path>."
+    desc: "Run the template's own tests. Hermetic ones always run; engine-backed ones (SAME_STEP semantics) need a cached engine (any task that uses one fills out/cache) or LOCKSTEP_TEST_ENGINE=<path>."
     cmds:
       - '"{{.VENV}}/bin/pip" install --quiet pytest'
       - '"{{.PY}}" -m pytest tests -q'
