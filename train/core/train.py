@@ -3,7 +3,7 @@
 Real in the sense that matters here: it steps the ACTUAL engine wasm through
 ``lockstep_train``, with the same physics and the same observations a ranked
 match uses. There is nothing per-environment in it — the env, the spaces and
-the reward all come from the engine's own tensor-wire declaration. It is not tuned, and a short run produces a weak agent — that is
+the reward all come from the engine's own declaration. It is not tuned, and a short run produces a weak agent — that is
 expected, and the README says so. What it produces is a genuine policy whose
 weights came from playing the environment, which is what makes the exported ONNX
 worth shipping.

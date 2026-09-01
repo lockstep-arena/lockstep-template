@@ -5,7 +5,7 @@ One command (``task train`` runs it), for ANY published environment::
     python -m train.main --env <slug> --steps 8192 --engine out/engine.wasm
 
 Nothing here is per-environment: the env, its spaces and its reward come
-from the engine wasm's own tensor-wire declaration (``lockstep_train``
+from the engine wasm's own declaration (``lockstep_train``
 reads it), and the staged bundle pairs your trained ``policy.onnx`` with
 the GENERIC agent shell ``task engine`` downloaded. The staged bundle is
 what the platform actually consumes — and what ``lockstep match run`` /

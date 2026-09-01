@@ -5,9 +5,9 @@ becomes an input stream by its own shape and dtype, and the action head is
 sized from the action space. The ONNX signature is DERIVED — input names
 are the obs Dict keys, the output is ``action`` — which is exactly the
 signature the generic ONNX agent shell binds at match time, because both
-sides read the same tensor-wire declaration.
+sides read the same declaration.
 
-Stream kinds (the shapes the tensor wire carries today):
+Stream kinds (the value shapes the Lockstep wire carries today):
 
 - ``uint8`` rank-3 ``Box`` — a CNN stream. The wire declares images
   CHANNEL-FIRST (an image strip declares as ``u8[1, H, W]``), and the shell

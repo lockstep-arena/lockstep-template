@@ -17,7 +17,7 @@ package lockstep:agent@0.1.0;
 ///
 /// The agent never sees the physics world, the descriptor, or any other engine
 /// type. It receives opaque bytes and returns opaque bytes; what those bytes
-/// mean is the tensor wire (`lockstep-interface::wire`, docs/wire.md), whose
+/// mean is the Lockstep wire (`lockstep-interface::wire`, docs/wire.md), whose
 /// layout is the ENVIRONMENT's, versioned by `descriptor.payload-schema-version`
 /// on the engine side.
 world agent {
@@ -42,7 +42,7 @@ world agent {
     /// index, its starting state, the routine it will be scored against.
     /// Produced by the engine as `seat-init.payload`.
     ///
-    /// The tensor-wire `SeatInit`. Its layout is the ENVIRONMENT's, versioned
+    /// The Lockstep-wire `SeatInit`. Its layout is the ENVIRONMENT's, versioned
     /// by the engine's `descriptor.payload-schema-version`. When that bumps, agents built
     /// against the old schema are marked stale rather than silently
     /// misreading these bytes.
@@ -50,7 +50,7 @@ world agent {
 
     /// ENGINE -> this agent, once per tick: this seat's OBSERVATION.
     ///
-    /// The tensor-wire `View`: ONLY what the environment has decided this seat
+    /// The Lockstep-wire `View`: ONLY what the environment has decided this seat
     /// may know. It is not a view of
     /// the whole match — an agent cannot see the omniscient archive frame, and
     /// hidden information stays hidden by simply never being encoded here. Do
@@ -61,7 +61,7 @@ world agent {
 
     /// This agent -> ENGINE, once per tick: this seat's ACTION.
     ///
-    /// The tensor-wire `Input`: the return of `on-tick`, and the ONLY way an
+    /// The Lockstep-wire `Input`: the return of `on-tick`, and the ONLY way an
     /// agent affects the match. The engine may reject it; a malformed or
     /// oversized input gets the seat the neutral action for that tick rather
     /// than failing the match.
@@ -81,7 +81,7 @@ world agent {
     /// arrangement, and same caveat, as engine's `deps/physics`.
     import lockstep:inference/inference@0.1.0;
 
-    /// One-time per-seat setup. The bytes are the tensor-wire seat-init.
+    /// One-time per-seat setup. The bytes are the Lockstep-wire seat-init.
     export init: func(init-state: seat-init-payload);
 
     /// Receive this tick's view, return this tick's input.

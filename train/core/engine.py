@@ -5,7 +5,7 @@ Downloads BOTH halves of the agent story next to each other::
     out/engine.wasm       the mode's engine — what you train against
     out/agent-onnx.wasm   the generic ONNX agent shell — what you ship
 
-The shell is generic across every environment (it reads the tensor-wire
+The shell is generic across every environment (it reads the Lockstep-wire
 declaration and binds ONNX inputs by name), but it is versioned WITH the
 release, so it is fetched from the same release directory rather than
 pinned here. Each file gets a ``.url`` stamp so switching ``ENV``/``MODE``

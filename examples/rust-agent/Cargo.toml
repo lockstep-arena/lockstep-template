@@ -1,4 +1,4 @@
-# A tensor-wire agent in pure Rust → wasm32-wasip2, built from PUBLIC
+# A Lockstep-wire agent in pure Rust → wasm32-wasip2, built from PUBLIC
 # artifacts only: the agent WIT world (vendored under wit/) and the tensor
 # wire SPEC (docs/wire.md, vendored into this template) —
 # re-implemented by hand in src/wire.rs, no codegen, no schema files.

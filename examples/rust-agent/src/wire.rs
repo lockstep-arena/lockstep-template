@@ -1,4 +1,4 @@
-//! A HAND-WRITTEN tensor-wire (v1) reader/writer — the whole point.
+//! A HAND-WRITTEN Lockstep-wire (v1) reader/writer — the whole point.
 //!
 //! The wire is a *spec*, not a library: this file re-implements it from the
 //! published document (`docs/wire.md` in this template — the vendored copy
@@ -10,12 +10,12 @@
 //! Encoding rules (the short version — the spec is normative):
 //! - everything little-endian; `f32` is IEEE-754 binary32
 //! - `str` = `u16` length + UTF-8 bytes, no terminator
-//! - every tensor and slice carries a `doc` string (slices a `unit` too),
+//! - every value and slice carries a `doc` string (slices a `unit` too),
 //!   and the seat-init ends with the goal / reward / ends brief — the
 //!   environment documents itself; decoders that don't care skip the strings
-//! - a tensor's bytes are row-major, `dtype size × product(shape)` exactly
+//! - a value's bytes are row-major, `dtype size × product(shape)` exactly
 //! - `dtype`: 0 = f32 (4 B), 1 = u8 (1 B), 2 = i32 (4 B)
-//! - tensors appear in DECLARED order with exact byte lengths
+//! - values appear in DECLARED order with exact byte lengths
 
 #![allow(dead_code)]
 
@@ -108,9 +108,9 @@ pub struct Slice {
 }
 
 #[derive(Clone, Debug)]
-pub struct TensorSpec {
+pub struct ValueSpec {
     pub name: String,
-    /// What this tensor is (and, for rank ≥ 2, what rows/columns mean).
+    /// What this value is (and, for rank ≥ 2, what rows/columns mean).
     pub doc: String,
     pub dtype: Dtype,
     pub shape: Vec<u32>,
@@ -121,7 +121,7 @@ pub struct TensorSpec {
     pub slices: Vec<Slice>,
 }
 
-impl TensorSpec {
+impl ValueSpec {
     pub fn numel(&self) -> usize {
         self.shape
             .iter()
@@ -213,8 +213,8 @@ pub struct Brief {
 #[derive(Debug)]
 pub struct SeatInit {
     pub seat: u32,
-    pub obs: Vec<TensorSpec>,
-    pub actions: Vec<TensorSpec>,
+    pub obs: Vec<ValueSpec>,
+    pub actions: Vec<ValueSpec>,
     pub meta: Vec<(String, String)>,
     pub brief: Brief,
 }
@@ -229,11 +229,11 @@ impl SeatInit {
         let seat = r.u32()?;
         let n_obs = r.u32()? as usize;
         let obs = (0..n_obs)
-            .map(|_| TensorSpec::parse(&mut r))
+            .map(|_| ValueSpec::parse(&mut r))
             .collect::<Result<_>>()?;
         let n_act = r.u32()? as usize;
         let actions = (0..n_act)
-            .map(|_| TensorSpec::parse(&mut r))
+            .map(|_| ValueSpec::parse(&mut r))
             .collect::<Result<_>>()?;
         let n_meta = r.u32()? as usize;
         let meta = (0..n_meta)
@@ -260,7 +260,7 @@ impl SeatInit {
             .map(|(_, v)| v.as_str())
     }
 
-    pub fn action(&self, name: &str) -> Option<&TensorSpec> {
+    pub fn action(&self, name: &str) -> Option<&ValueSpec> {
         self.actions.iter().find(|s| s.name == name)
     }
 }
@@ -272,9 +272,9 @@ pub struct View<'a> {
     pub tick: u32,
     pub reward: f32,
     pub done: bool,
-    /// Raw tensor bytes in DECLARED obs order — sliced zero-copy from the
+    /// Raw observation bytes in DECLARED order — sliced zero-copy from the
     /// received buffer (a big image strip is never copied).
-    pub tensors: Vec<&'a [u8]>,
+    pub values: Vec<&'a [u8]>,
 }
 
 impl<'a> View<'a> {
@@ -286,7 +286,7 @@ impl<'a> View<'a> {
         let done = r.u8()? != 0;
         r.take(3)?; // pad
         let n = r.u32()? as usize;
-        let tensors = (0..n)
+        let values = (0..n)
             .map(|_| {
                 let len = r.u32()? as usize;
                 r.take(len)
@@ -296,31 +296,31 @@ impl<'a> View<'a> {
             tick,
             reward,
             done,
-            tensors,
+            values,
         })
     }
 }
 
-/// Encode an `Input`: one raw byte blob per action tensor, declared order.
-pub fn encode_input(tensors: &[Vec<u8>]) -> Vec<u8> {
-    let payload: usize = tensors.iter().map(|t| 4 + t.len()).sum();
+/// Encode an `Input`: one raw byte blob per declared action, in order.
+pub fn encode_input(values: &[Vec<u8>]) -> Vec<u8> {
+    let payload: usize = values.iter().map(|t| 4 + t.len()).sum();
     let mut out = Vec::with_capacity(8 + payload);
     out.extend_from_slice(b"LSTA");
-    out.extend_from_slice(&(tensors.len() as u32).to_le_bytes());
-    for t in tensors {
+    out.extend_from_slice(&(values.len() as u32).to_le_bytes());
+    for t in values {
         out.extend_from_slice(&(t.len() as u32).to_le_bytes());
         out.extend_from_slice(t);
     }
     out
 }
 
-/// f32 values -> raw tensor bytes.
+/// f32 values -> raw element bytes.
 pub fn f32_bytes(values: &[f32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 
 /// The neutral raw bytes for ANY action spec — what "do nothing" means.
-pub fn neutral_bytes(spec: &TensorSpec) -> Vec<u8> {
+pub fn neutral_bytes(spec: &ValueSpec) -> Vec<u8> {
     match spec.dtype {
         Dtype::F32 => f32_bytes(&spec.neutral_f32()),
         Dtype::I32 => spec

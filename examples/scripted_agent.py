@@ -2,14 +2,14 @@
 environment.
 
 The platform doesn't care where your ONNX came from — an agent is any graph
-with the right signature (one input per observation tensor, by name; one
+with the right signature (one input per declared observation, by name; one
 ``action`` output in [-1, 1]) placed in a bundle next to the generic shell.
 This example builds the simplest correct one: a graph that plays NEUTRAL.
 The shell maps ``[-1, 1]`` outputs affinely onto each action element's
 declared bounds, so an all-zeros output is every element's bounds midpoint
-— the same "neutral" the tensor wire itself defines for a missing input.
+— the same "neutral" the Lockstep wire itself defines for a missing input.
 
-Everything about the graph is derived from the engine's own tensor-wire
+Everything about the graph is derived from the engine's own Lockstep-wire
 declaration (``lockstep_train`` reads it): input names and shapes are the
 declared observation tensors, the action width is the declared action
 tensor. No environment is named anywhere.

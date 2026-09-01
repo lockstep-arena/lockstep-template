@@ -1,7 +1,7 @@
 """The genericity gate: train/ names no environment, ever.
 
 Environments are resolved from the CDN at runtime (train/core/discovery.py)
-and described by their own engines' tensor-wire declarations. The ONLY
+and described by their own engines' declarations. The ONLY
 Lockstep package train/ may import is ``lockstep_train`` — the generic,
 environment-agnostic host. A direct import of anything else (or any
 environment slug appearing in the training core) would silently re-couple

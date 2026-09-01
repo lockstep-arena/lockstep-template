@@ -2,7 +2,7 @@
 //! private dependencies, for ANY environment.
 //!
 //! Everything it consumes is public: the `lockstep:agent` WIT world
-//! (vendored under `wit/`) and the tensor-wire SPEC (`docs/wire.md`, vendored into
+//! (vendored under `wit/`) and the Lockstep-wire SPEC (`docs/wire.md`, vendored into
 //! this template from the platform's normative copy), re-implemented by hand in `src/wire.rs`
 //! — no codegen, no schema files, no reference crate. Compare
 //! `examples/scripted_agent.py`: same idea, but instead of riding the
@@ -12,7 +12,7 @@
 //! The policy: read the seat-init's self-description at `init`, then
 //!
 //! - on dance-off's servo mode (recognized purely from the DECLARATION —
-//!   meta `model = "dance-off"` plus an action tensor with `joint_targets`
+//!   meta `model = "dance-off"` plus an action with `joint_targets`
 //!   and `effort` slices) it sways the first two joints on a slow sine and
 //!   spreads effort evenly: a bot that visibly dances;
 //! - on ANY other environment it plays the wire's own neutral (the bounds
@@ -26,7 +26,7 @@ pub mod wire;
 
 #[cfg(target_arch = "wasm32")]
 mod component {
-    use crate::wire::{self, SeatInit, TensorSpec, View};
+    use crate::wire::{self, SeatInit, ValueSpec, View};
     use std::sync::Mutex;
 
     wit_bindgen::generate!({
@@ -37,16 +37,16 @@ mod component {
 
     /// What `init` learned; `on_tick` replays it every tick.
     struct Plan {
-        /// Pre-encoded neutral bytes, one blob per action tensor.
+        /// Pre-encoded neutral bytes, one blob per declared action.
         neutral: Vec<Vec<u8>>,
         /// Present when the declaration matches dance-off's servo shape.
         sway: Option<Sway>,
     }
 
     struct Sway {
-        /// Index of the swayed tensor within the action list.
+        /// Index of the swayed action within the action list.
         action_index: usize,
-        spec: TensorSpec,
+        spec: ValueSpec,
         joint_targets: (usize, usize), // start, len
         effort: (usize, usize),
     }
@@ -86,29 +86,29 @@ mod component {
             };
             let tick = View::decode(&view).map(|v| v.tick).unwrap_or(0);
 
-            let mut tensors = plan.neutral.clone();
+            let mut values = plan.neutral.clone();
             if let Some(sway) = &plan.sway {
                 // The same lazy sway as the Python example: ~half-hertz sine
                 // on the first two joints' x rotation, even effort.
                 let seconds = tick as f32 / 60.0;
                 let wave = 0.35 * libm::sinf(seconds * 3.0);
-                let mut values = sway.spec.neutral_f32();
+                let mut sway_values = sway.spec.neutral_f32();
                 let (jt_start, jt_len) = sway.joint_targets;
                 // joint_targets is rotation VECTORS, 3 values per joint —
                 // (x, y, z) per joint; sway x of joints 0 and 1.
                 for joint in 0..2 {
                     let x = jt_start + joint * 3;
                     if x < jt_start + jt_len {
-                        values[x] = wave;
+                        sway_values[x] = wave;
                     }
                 }
                 let (e_start, e_len) = sway.effort;
-                for v in values.iter_mut().skip(e_start).take(e_len) {
+                for v in sway_values.iter_mut().skip(e_start).take(e_len) {
                     *v = 0.5;
                 }
-                tensors[sway.action_index] = wire::f32_bytes(&values);
+                values[sway.action_index] = wire::f32_bytes(&sway_values);
             }
-            wire::encode_input(&tensors)
+            wire::encode_input(&values)
         }
     }
 

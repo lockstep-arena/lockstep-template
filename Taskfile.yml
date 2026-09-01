@@ -4,7 +4,7 @@
 # ENV=<slug> parameterizes everything: which environment's release to fetch,
 # train against and submit to. There are no per-environment packages and no
 # per-environment config in this repo — the CDN's `latest.json` names the
-# release, and the engine wasm's own tensor-wire declaration describes the
+# release, and the engine wasm's own declaration describes the
 # whole interface. dance-off is only the DEFAULT, as the shipped reference
 # environment. Browse the catalog: https://lockstep.it/arenas
 version: "3"
@@ -44,7 +44,7 @@ tasks:
       - '"{{.PY}}" -m train.core.engine --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} {{if .VERSION}}--version "{{.VERSION}}"{{end}} --out out'
 
   info:
-    desc: "Print the environment's brief and wire layout in the terminal — goal, reward, what ends an episode, every tensor and slice with units, the budgets — from the engine you will train against. ENV= MODE= (the same page as the Interface tab)"
+    desc: "Print the environment's brief and wire layout in the terminal — goal, reward, what ends an episode, every value and slice with units, the budgets — from the engine you will train against. ENV= MODE= (the same page as the Interface tab)"
     deps: [engine]
     cmds:
       # Runs the fetched engine for one reset and prints what THAT engine

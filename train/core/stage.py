@@ -9,8 +9,8 @@ The staged bundle is what the platform actually consumes — and what
       artifacts/policy.onnx
 
 The component is NOT trained here and is not per-environment either: it is
-the one generic shell every environment shares. It decodes the tensor-wire
-seat-init, feeds each observation tensor to the ONNX graph BY NAME (u8
+the one generic shell every environment shares. It decodes the Lockstep-wire
+seat-init, feeds each observation to the ONNX graph BY NAME (u8
 images as f32/255, batch dim prepended) and maps the graph's ``action``
 output from [-1, 1] onto the declared action bounds. The environment
 specifics live entirely in ``policy.onnx``'s learned weights.
