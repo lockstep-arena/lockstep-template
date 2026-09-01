@@ -63,7 +63,7 @@ def bundle_manifest(bundle: Path) -> dict | None:
     if bundle.is_dir():
         manifest = bundle / "lockstep.toml"
         if manifest.is_file():
-            return tomllib.loads(manifest.read_text())
+            return tomllib.loads(manifest.read_text(encoding="utf-8"))
         return None
     if bundle.is_file() and bundle.suffix == ".zip":
         with zipfile.ZipFile(bundle) as zf:

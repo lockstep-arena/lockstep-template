@@ -81,7 +81,7 @@ def agent_toml_text(cfg: AgentConfig) -> str:
 def write_agent_toml(cfg: AgentConfig) -> Path:
     cfg.dir.mkdir(parents=True, exist_ok=True)
     path = cfg.dir / "agent.toml"
-    path.write_text(agent_toml_text(cfg))
+    path.write_text(agent_toml_text(cfg), encoding="utf-8")
     return path
 
 
@@ -93,7 +93,7 @@ def load_agent(name: str, root: Path = AGENTS_ROOT) -> AgentConfig:
             f"no agent at {path} (agents present: {known}) — create one: "
             f"task create-agent NAME={name} ENV=<slug>"
         )
-    raw = tomllib.loads(path.read_text())
+    raw = tomllib.loads(path.read_text(encoding="utf-8"))
     agent = raw.get("agent", {})
     release = raw.get("release", {})
     lang = agent.get("lang", "python")

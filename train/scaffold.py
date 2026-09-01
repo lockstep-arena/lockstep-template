@@ -312,10 +312,10 @@ class ScriptedPolicy(nn.Module):
 def scaffold_python(cfg: AgentConfig, init, budgets, title: str) -> None:
     d = cfg.dir
     d.mkdir(parents=True, exist_ok=True)
-    (d / "interface.py").write_text(gen_interface_py(cfg, init, budgets, title))
+    (d / "interface.py").write_text(gen_interface_py(cfg, init, budgets, title), encoding="utf-8")
     policy = d / "policy.py"
     if not policy.exists():
-        policy.write_text(gen_policy_py(cfg, init))
+        policy.write_text(gen_policy_py(cfg, init), encoding="utf-8")
         print(f"→ {policy}  (yours — edit it)", file=sys.stderr)
     else:
         print(f"✓ {policy} untouched (yours)", file=sys.stderr)
@@ -514,7 +514,7 @@ def scaffold_rust(cfg: AgentConfig, init, budgets, title: str) -> None:
         shutil.rmtree(d / "wit")
     shutil.copytree(WIT_DIR, d / "wit")
     shutil.copyfile(REFERENCE / "rust-wire" / "src" / "wire.rs", d / "src" / "wire.rs")
-    (d / "src" / "interface.rs").write_text(gen_interface_rs(cfg, init, budgets, title))
+    (d / "src" / "interface.rs").write_text(gen_interface_rs(cfg, init, budgets, title), encoding="utf-8")
     print(f"→ {d / 'src' / 'interface.rs'}  (generated)", file=sys.stderr)
     for path, content in (
         (d / "Cargo.toml", gen_cargo_toml(cfg)),
@@ -523,11 +523,11 @@ def scaffold_rust(cfg: AgentConfig, init, budgets, title: str) -> None:
         if path.exists():
             print(f"✓ {path} untouched (yours)", file=sys.stderr)
         else:
-            path.write_text(content)
+            path.write_text(content, encoding="utf-8")
             print(f"→ {path}  (yours — edit it)", file=sys.stderr)
     gi = d / ".gitignore"
     if not gi.exists():
-        gi.write_text("target/\nout/\n")
+        gi.write_text("target/\nout/\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -718,7 +718,7 @@ def scaffold_c(cfg: AgentConfig, init, budgets, title: str) -> None:
     shutil.copytree(WIT_DIR, d / "wit")
     for name in ("wire.h", "wire.c"):
         shutil.copyfile(REFERENCE / "c-wire" / name, d / name)
-    (d / "interface.h").write_text(gen_interface_h(cfg, init, budgets, title))
+    (d / "interface.h").write_text(gen_interface_h(cfg, init, budgets, title), encoding="utf-8")
     print(f"→ {d / 'interface.h'}  (generated)", file=sys.stderr)
     for path, content, mode in (
         (d / "agent.c", gen_agent_c(cfg, init), 0o644),
@@ -727,12 +727,12 @@ def scaffold_c(cfg: AgentConfig, init, budgets, title: str) -> None:
         if path.exists():
             print(f"✓ {path} untouched (yours)", file=sys.stderr)
         else:
-            path.write_text(content)
+            path.write_text(content, encoding="utf-8")
             path.chmod(mode)
             print(f"→ {path}  (yours — edit it)", file=sys.stderr)
     gi = d / ".gitignore"
     if not gi.exists():
-        gi.write_text("gen/\nout/\n")
+        gi.write_text("gen/\nout/\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

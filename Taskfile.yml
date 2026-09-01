@@ -205,7 +205,7 @@ tasks:
       - |
         if command -v cc >/dev/null 2>&1; then
           mkdir -p out
-          cc -std=c99 -Wall -Wextra -Werror -o out/test_wire reference/c-wire/test_wire.c reference/c-wire/wire.c
+          cc -std=c99 -Wall -Wextra -Werror -o out/test_wire reference/c-wire/test_wire.c reference/c-wire/wire.c -lm
           ./out/test_wire reference/rust-wire/tests/fixtures
         else
           echo "test: no C compiler on PATH — skipping the C wire reference (CI runs it)"

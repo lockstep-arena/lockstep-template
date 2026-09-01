@@ -58,7 +58,7 @@ def bundle_component(cfg: AgentConfig, component: Path) -> Path:
     bundle = cfg.bundle_dir
     bundle.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(component, bundle / "component.wasm")
-    (bundle / "lockstep.toml").write_text(manifest_text(cfg, with_policy=False))
+    (bundle / "lockstep.toml").write_text(manifest_text(cfg, with_policy=False), encoding="utf-8")
     return bundle
 
 
@@ -112,7 +112,7 @@ def build_python(cfg: AgentConfig) -> Path:
 
 def build_rust(cfg: AgentConfig) -> Path:
     crate_name = None
-    for line in (cfg.dir / "Cargo.toml").read_text().splitlines():
+    for line in (cfg.dir / "Cargo.toml").read_text(encoding="utf-8").splitlines():
         if line.startswith("name = "):
             crate_name = line.split('"')[1]
             break

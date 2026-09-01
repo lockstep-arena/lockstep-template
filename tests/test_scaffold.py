@@ -158,7 +158,7 @@ POLICY_FILE = {
 def test_every_slice_lands_in_the_interface_file(agent_env, lang):
     cfg = cfg_for(lang)
     GENERATOR[lang](cfg, synthetic_init(), BUDGETS, "fixture-env · default")
-    text = (cfg.dir / INTERFACE_FILE[lang]).read_text()
+    text = (cfg.dir / INTERFACE_FILE[lang]).read_text(encoding="utf-8")
     for fragment in EXPECTED_FRAGMENTS[lang]:
         assert fragment in text, f"{lang} interface is missing {fragment!r}"
 
@@ -167,7 +167,7 @@ def test_python_interface_executes_and_slices_are_right(agent_env):
     cfg = cfg_for("python")
     scaffold_mod.scaffold_python(cfg, synthetic_init(), BUDGETS, "t")
     ns: dict = {}
-    exec((cfg.dir / "interface.py").read_text(), ns)
+    exec((cfg.dir / "interface.py").read_text(encoding="utf-8"), ns)
     assert ns["OBS_BODY"] == "body"
     assert ns["OBS_BODY_JOINT_VEL"] == slice(2, 4)
     assert ns["OBS_MARQUEE_SHAPE"] == (1, 4, 8)
@@ -183,12 +183,12 @@ def test_regeneration_refreshes_generated_but_never_policy(agent_env, lang):
     GENERATOR[lang](cfg, init, BUDGETS, "t")
     policy = cfg.dir / POLICY_FILE[lang]
     iface = cfg.dir / INTERFACE_FILE[lang]
-    policy.write_text("# MY EDITS\n" + policy.read_text())
+    policy.write_text("# MY EDITS\n" + policy.read_text(encoding="utf-8"), encoding="utf-8")
     iface_marker = "SHOULD BE REGENERATED AWAY"
-    iface.write_text(iface_marker)
+    iface.write_text(iface_marker, encoding="utf-8")
     GENERATOR[lang](cfg, init, BUDGETS, "t")
-    assert policy.read_text().startswith("# MY EDITS"), f"{lang} policy was clobbered"
-    assert iface_marker not in iface.read_text(), f"{lang} interface was not regenerated"
+    assert policy.read_text(encoding="utf-8").startswith("# MY EDITS"), f"{lang} policy was clobbered"
+    assert iface_marker not in iface.read_text(encoding="utf-8"), f"{lang} interface was not regenerated"
 
 
 def test_agent_toml_round_trips(agent_env):

@@ -59,6 +59,7 @@ def stage(
         "\n"
         "[artifacts.policy]\n"
         'kind = "onnx"\n'
-        'path = "artifacts/policy.onnx"\n'
+        'path = "artifacts/policy.onnx"\n',
+        encoding="utf-8",
     )
     return bundle
