@@ -1,10 +1,10 @@
 # Proves the whole pipeline on every OS researchers actually use.
 #
-# dance-off is CI's named test slug — the one place outside docs/examples
-# where an environment may be named. The template itself resolves
-# environments from the CDN at runtime; CI just has to pick SOME release to
-# train against. (The engine-backed steps fetch from the live CDN, so they
-# go green with the first environments/ deploy.)
+# dance-off is CI's named test slug — the one place outside docs where an
+# environment may be named. The template itself resolves environments from
+# the CDN at runtime; CI just has to pick SOME release to build against.
+# (The engine-backed steps fetch from the live CDN, so they go green with
+# the first environments/ deploy.)
 name: ci
 
 on:
@@ -40,41 +40,65 @@ jobs:
       - name: Install the training stack
         run: |
           pip install -r requirements.txt
-          pip install "lockstep-train[pettingzoo]>=0.3.3" pytest
+          pip install "lockstep-train[pettingzoo]>=0.5.0" pytest
 
-      - name: Hermetic template tests (import lint, discovery vs a mock CDN, stage, network/export)
+      - name: Rust toolchain (the rust scaffold + the wire reference)
+        run: rustup target add wasm32-wasip2
+
+      - name: C toolchain (wasi-sdk + wit-bindgen, as `task setup LANGS=c` installs them)
+        # Runners have neither, so this exercises the real download path
+        # into out/toolchains/ — the same one a user without /opt/wasi-sdk
+        # hits.
+        run: python -m train.toolchain install c
+
+      - name: Wire references vs the spec goldens (Rust, then C natively where cc exists)
+        run: |
+          cargo test --manifest-path reference/rust-wire/Cargo.toml --quiet
+          if command -v cc >/dev/null 2>&1; then
+            mkdir -p out
+            cc -std=c99 -Wall -Wextra -Werror -o out/test_wire reference/c-wire/test_wire.c reference/c-wire/wire.c
+            ./out/test_wire reference/rust-wire/tests/fixtures
+          else
+            echo "no native cc on this runner — the C WASM build below still proves wire.c compiles"
+          fi
+
+      - name: Hermetic tests (scaffold generation, agent.toml, discovery vs a mock CDN, stage, export) + scaffold compile tests (rust + c → wasm components)
         run: python -m pytest tests -q
 
-      - name: Rust example agent — hand-written wire decoder vs the spec goldens
-        run: |
-          rustup target add wasm32-wasip2
-          cargo test --manifest-path examples/rust-agent/Cargo.toml --quiet
-          cargo build --release --target wasm32-wasip2 --manifest-path examples/rust-agent/Cargo.toml
+      - name: create-agent from dance-off's live release (python)
+        run: python -m train.scaffold --name ci-bot --env dance-off
 
-      - name: Fetch dance-off's current release (engine + generic shell)
-        run: python -m train.core.engine --env dance-off --out out
+      - name: Build the hand-written (untrained) policy through export/stage
+        run: python -m train.build --agent ci-bot
 
       - name: Engine-backed tests (SAME_STEP autoreset semantics, parallel env)
+        # The scaffold warmed the keyed cache, so these no longer skip.
         run: python -m pytest tests -q
 
-      - name: Scripted agent through the full export/stage pipeline
-        run: python -m examples.scripted_agent --env dance-off
-
       - name: Train through the full pipeline (tiny, vectorized, spawn workers)
-        run: |
-          python -m train.main --env dance-off --steps 256 --num-envs 2 \
-            --engine out/engine.wasm --shell out/agent-onnx.wasm
+        run: python -m train.main --agent ci-bot --steps 256 --num-envs 2
 
       - name: Self-play (PARALLEL) through the same pipeline
-        run: |
-          python -m train.main --env dance-off --steps 128 --parallel \
-            --engine out/engine.wasm --shell out/agent-onnx.wasm
+        run: python -m train.main --agent ci-bot --steps 128 --parallel
 
-      - name: The staged bundle is a valid v2 manifest
+      - name: create-agent + build in Rust (component from the same declaration)
+        run: |
+          python -m train.scaffold --name ci-rust --env dance-off --lang rust
+          python -m train.build --agent ci-rust
+
+      - name: create-agent + build in C (wit-bindgen + wasi-sdk → component)
+        run: |
+          python -m train.scaffold --name ci-c --env dance-off --lang c
+          python -m train.build --agent ci-c
+
+      - name: Every staged bundle is a valid v2 manifest for its mode
         run: |
           python - <<'PY'
           import tomllib
-          m = tomllib.loads(open("out/agent-bundle/lockstep.toml").read())
-          assert m["schema_version"] == 2 and m["environment"] == "dance-off", m
-          print("bundle manifest ok:", m["environment"], m["mode"], m["payload_schema_version"])
+          for name, kind in (("ci-bot", "onnx"), ("ci-rust", "component"), ("ci-c", "component")):
+              m = tomllib.loads(open(f"agents/{name}/out/bundle/lockstep.toml").read())
+              assert m["schema_version"] == 2 and m["environment"] == "dance-off", (name, m)
+              has_policy = "artifacts" in m and "policy" in m.get("artifacts", {})
+              assert has_policy == (kind == "onnx"), (name, m)
+              print(f"bundle ok: {name} → {m['environment']} [{m['mode']}] psv {m['payload_schema_version']}")
           PY

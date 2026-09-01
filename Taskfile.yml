@@ -63,7 +63,17 @@ tasks:
       - sh: test -n "{{.NAME}}"
         msg: "pass NAME=<agent-name> (and ENV=<slug>)"
     cmds:
-      - '"{{.PY}}" -m train.scaffold --name "{{.NAME}}" --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} {{if .LANG}}--lang "{{.LANG}}"{{end}} {{if .FORCE}}--force{{end}}'
+      # LANG is also the POSIX locale variable, so a value that is not one
+      # of ours and LOOKS like a locale (C.UTF-8, en_US.UTF-8, POSIX, C)
+      # means "not passed" — anything else non-empty is a real typo.
+      - |
+        LANG_IN="{{.LANG}}"
+        case "$LANG_IN" in
+          python|rust|c) LANG_ARG="--lang $LANG_IN" ;;
+          ""|C|POSIX|*.*|*_*) LANG_ARG="" ;;
+          *) echo "create-agent: LANG=$LANG_IN is not one of python | rust | c" >&2; exit 2 ;;
+        esac
+        "{{.PY}}" -m train.scaffold --name "{{.NAME}}" --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} $LANG_ARG {{if .FORCE}}--force{{end}}
 
   info:
     desc: "Print the environment's brief and wire layout in the terminal — goal, reward, what ends an episode, every value and slice with units, the budgets — from the engine you will train against. ENV= MODE= (the same page as the Interface tab)"

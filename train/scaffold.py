@@ -7,7 +7,7 @@ fetches the (env, mode) release into the keyed cache, decodes seat 0's
 doc/unit/bounds, the goal/reward/ends brief, the budgets) and writes a
 ready-to-edit agent project for the language of your choice::
 
-    python -m train.scaffold --name my-bot --env dance-off [--mode M] [--lang python|rust|c]
+    python -m train.scaffold --name my-bot --env <slug> [--mode M] [--lang python|rust|c]
 
 Two kinds of files, and the contract between them:
 
@@ -697,7 +697,8 @@ CLANG="$WASI_SDK/bin/clang"
 [ -x "$CLANG" ] || {{ echo "no wasi-sdk at $WASI_SDK — run: task setup LANGS=c" >&2; exit 1; }}
 
 # 1. World bindings (gen/agent.h, gen/agent.c, gen/agent_component_type.o).
-wit-bindgen c wit --world agent --out-dir gen
+WIT_BINDGEN="${{WIT_BINDGEN:-wit-bindgen}}"
+"$WIT_BINDGEN" c wit --world agent --out-dir gen
 
 # 2. One clang line: C → wasm32-wasip2 component (reactor: no main).
 mkdir -p out

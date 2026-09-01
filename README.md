@@ -2,9 +2,12 @@
 
 Build an agent for any [Lockstep](https://lockstep.it) environment, watch it
 play a real local match, and upload it to compete — from nothing but this
-repo. The engine you train against is the *same WASM binary* that runs
+repo. The engine you build against is the *same WASM binary* that runs
 ranked matches, and it **documents itself**: goal, reward, what ends an
-episode, every tensor and slice with units. Nothing here is per-environment.
+episode, every observation and slice with units. `task create-agent` turns
+that self-description into a ready-to-edit agent project — every field
+named, every bound stated, in Python, Rust or C. Nothing here is
+per-environment.
 
 ## Ten lines to a real match
 
@@ -12,21 +15,30 @@ episode, every tensor and slice with units. Nothing here is per-environment.
 git clone https://github.com/lockstep-arena/lockstep-template
 cd lockstep-template
 task doctor                      # what this machine is missing, and the exact fix for each
-task quickstart ENV=go1-beacon   # setup → engine → a scripted agent → a real local match
+task quickstart ENV=go1-beacon   # setup → create-agent → build → a real local match
 ```
 
 That ends with `out/archive.bin`: a whole match, scored by the real engine.
 Drop it on <https://lockstep.it/replay> to watch it. Then:
 
 ```sh
-task info  ENV=go1-beacon        # what the environment IS — the brief and the wire, in this terminal
-task train ENV=go1-beacon        # a short PPO run → ONNX → parity check → out/agent-bundle
-task match ENV=go1-beacon        # your policy in every seat, archived to out/archive.bin
-task upload ENV=go1-beacon       # compete (needs LOCKSTEP_API_KEY in .env)
+task info ENV=go1-beacon         # what the environment IS — the brief and the wire, in this terminal
+# edit agents/my-bot/policy.py — every observation is a named slice away
+task build AGENT=my-bot          # your hand-written policy, no training
+task train AGENT=my-bot          # or: a short PPO run → ONNX → parity check → the same bundle
+task match AGENT=my-bot          # your agent in every seat, archived to out/archive.bin
+task upload AGENT=my-bot         # compete (needs LOCKSTEP_API_KEY in .env)
 ```
 
-Every command takes `ENV=<slug>` (default `dance-off`) and, on multi-mode
-environments, `MODE=<key>`. Browse the catalog at
+The unit of work is an **agent**: `agents/<name>/`, scaffolded by
+`task create-agent NAME=… ENV=…` for one environment + mode + language.
+Its `agent.toml` records that identity, every other command reads it —
+so `AGENT=` can never pair your policy with the wrong engine, and may be
+omitted whenever exactly one agent exists. Engines download themselves
+into a keyed cache (`out/cache/<env>/<mode>/`) the first time something
+needs one.
+
+Browse the catalog at
 [lockstep.it/competitions](https://lockstep.it/competitions); each
 environment's **Interface** tab is `task info` rendered as a page, and its
 **Practice** tab is this README, per environment.
@@ -55,10 +67,11 @@ Want the long version with real output? [TUTORIAL.md](TUTORIAL.md).
   Ubuntu 24.04, Debian 13, Fedora 39+), Windows x86_64. CI proves the whole
   pipeline on all three on every change.
 
-Rust is **not** required for the training path — everything compiled arrives
-prebuilt (the CLI as a binary, the engine and the generic agent shell as WASM
-from the release). The optional [pure-Rust agent](#the-wasm-story) needs
-`rustup target add wasm32-wasip2`.
+Rust and C are **not** required: the default language is Python, and
+everything compiled arrives prebuilt (the CLI as a binary, the engine and
+the generic agent shell as WASM from the release). The
+[hand-written wasm track](#the-wasm-story) is one `task setup LANGS=rust`
+(or `LANGS=c`) away.
 
 For `task upload` only: an API key. Copy `.env.example` to `.env` and fill in
 `LOCKSTEP_API_KEY` (create a key from your account settings at lockstep.it).
@@ -67,33 +80,38 @@ For `task upload` only: an API key. Copy `.env.example` to `.env` and fill in
 
 | Command | What it does |
 |---|---|
-| `task doctor` | Check the machine: Python, Task, the CLI, the venv, the API key, the Rust toolchain — each with its fix. |
-| `task quickstart ENV=` | Zero decisions: `setup` → `engine` → `scripted` → `match`, then hands you the archive. |
-| `task setup` | Create `.venv`, install the training stack + `lockstep-train`. One-time; nothing per-environment. |
-| `task info ENV= MODE=` | The environment's brief and wire layout, from the engine you will train against. |
-| `task engine ENV= MODE= VERSION=` | Download the release's `engine.wasm` + generic `agent-onnx.wasm` into `out/` (no-op when unchanged). |
-| `task train ENV= MODE= STEPS= NUM_ENVS= RESUME=1 PARALLEL=1` | PPO → ONNX → parity check → stage `out/agent-bundle`. |
-| `task scripted ENV=` | The no-training example agent → `out/scripted-bundle`. |
-| `task rust-agent` | The pure-Rust example agent → a bare wasm component. |
-| `task match ENV= BUNDLE=` | A real local match through the CLI, both seats your bundle, archived to `out/archive.bin`. |
-| `task upload ENV= NAME= AGENT_ID=` | Upload the bundle to compete (or seal it for an assessment). |
-| `task test` | The template's own tests (hermetic + engine-backed). |
+| `task doctor` | Check the machine: Python, Task, the CLI, the venv, the API key, and — exactly when you have agents in that language — the Rust/C toolchains. Each with its fix. |
+| `task quickstart ENV=` | Zero decisions: `setup` → `create-agent` (python) → `build` → `match`, then hands you the archive. |
+| `task setup LANGS=` | Provision toolchains — the ONE place that installs anything. `python` (default): `.venv` + the training stack. `rust`: the wasm target. `c`: wasi-sdk + wit-bindgen (detects an existing install first). |
+| `task create-agent NAME= ENV= MODE= LANG=` | Scaffold `agents/<name>/` from the engine's own declaration: a generated interface file (regenerable) + a policy stub that is YOURS (never overwritten). |
+| `task info ENV= MODE=` | The environment's brief and wire layout, from the engine you will build against. |
+| `task train AGENT= STEPS= NUM_ENVS= RESUME=1 PARALLEL=1` | PPO → ONNX → parity check → stage `agents/<name>/out/bundle` (python agents). |
+| `task build AGENT=` | Build the bundle without training: python exports YOUR `policy.py`; rust/c compile the wasm component. |
+| `task match AGENT=` | A real local match through the CLI, every seat your agent, archived to `out/archive.bin`. |
+| `task upload AGENT= NAME= AGENT_ID=` | Upload the agent's bundle to compete (or seal it for an assessment). |
+| `task test` | The template's own tests (hermetic + engine-backed + the wire references vs the spec goldens). |
 
 <details>
-<summary><strong>Reading an environment: <code>task info</code></strong></summary>
+<summary><strong>Reading an environment: <code>task info</code> and the generated interface</strong></summary>
 
 The engine declares everything an agent needs — and everything a person
-needs. `task info` prints, for the mode you are about to train against:
+needs. `task info` prints, for the mode you are about to build against:
 
 - **The brief** — goal, what earns reward, what ends an episode, in the
   engine's words.
-- **What you see each tick** — every observation tensor with dtype, shape
-  and bounds, then every slice with its index range, unit and meaning.
-- **What you send back** — every action tensor with per-slice bounds, the
+- **What you see each tick** — every observation with dtype, shape and
+  bounds, then every slice with its index range, unit and meaning.
+- **What you send back** — every action with per-slice bounds, the
   neutral action the world plays when you miss a tick, and the ONNX output
   convention.
 - **Budgets** — control rate, wall-clock per tick, missed ticks allowed,
   memory cap, episode length, players.
+
+`task create-agent` writes the same facts into your agent as code —
+`interface.py` / `src/interface.rs` / `interface.h`, every slice a named
+constant with its doc, unit and bounds in a comment — so you never
+transcribe an index range from a web page again. Re-run it after a release
+bump to refresh (your policy files are never touched).
 
 `python -m lockstep_train.info --env <slug>` reads the platform's record of
 the release instead (no download, no wasm); `--json` emits it for scripts.
@@ -106,19 +124,22 @@ unexplained — ask its maintainers.
 <summary><strong>Bring your own training stack</strong></summary>
 
 The training loop in `train/` is deliberately small — the interesting part of
-this repo is the train → export → bundle → compete path, not the optimizer.
-The env underneath is plain Gymnasium, provided by `lockstep-train`
+this repo is the create → build → compete path, not the optimizer. The env
+underneath is plain Gymnasium, provided by `lockstep-train`
 (`pip install lockstep-train`):
 
 ```python
 import gymnasium, lockstep_train.env  # registration side effect
 
-env = gymnasium.make("Lockstep/Env-v0", engine_source="out/engine.wasm")
+env = gymnasium.make("Lockstep/Env-v0", engine_source="out/cache/<env>/<mode>/engine.wasm")
 obs, info = env.reset(seed=0)
 ```
 
 - Observations are a `Dict` of named `Box`es, actions a `Box` with
   per-element bounds — both derived from the engine's own declaration.
+  Your generated `interface.py` names every slice of every observation, so
+  feature engineering reads `obs["body"][iface.OBS_BODY_JOINT_VEL]`, not
+  `obs["body"][7:19]`.
 - The per-tick `reward` and `done` come from the engine too: training and
   competition are literally the same computation.
 - `gymnasium.make_vec(..., num_envs=8)` gets you the native vector env
@@ -127,8 +148,8 @@ obs, info = env.reset(seed=0)
   PettingZoo view — every seat, every tick.
 
 Ship whatever you train as ONNX with the declared signature — one input per
-observation tensor by name (`u8` images arrive as `f32 ÷ 255`), one output
-per action tensor by name in `[-1, 1]`, which the shell maps affinely onto
+declared observation by name (`u8` images arrive as `f32 ÷ 255`), one output
+per declared action by name in `[-1, 1]`, which the shell maps affinely onto
 the declared bounds — and stage it with `python -m train.main --from-weights`
 or your own copy of `train/core/stage.py`. The platform does not care what
 trained the graph.
@@ -146,7 +167,7 @@ still sit near zero for a long time. Two structural guards in this loop
 exist because of that: the entropy bonus and learning rate decay to zero
 over the run, and the policy log-std is clamped — otherwise a zero-gradient
 landscape slowly inflates exploration until the policy is noise.
-`out/metrics.csv` shows all of it per rollout.
+`agents/<name>/out/metrics.csv` shows all of it per rollout.
 
 </details>
 
@@ -156,7 +177,7 @@ landscape slowly inflates exploration until the policy is noise.
 **Train for real**
 
 ```sh
-task train STEPS=2000000 NUM_ENVS=8
+task train AGENT=my-bot STEPS=2000000 NUM_ENVS=8
 ```
 
 Expect hours, not minutes, for a visible policy on most environments. The
@@ -165,29 +186,32 @@ checkpoint is written every rollout; a crash costs at most one rollout.
 **Resume a crashed or stopped run**
 
 ```sh
-task train STEPS=2000000 RESUME=1
+task train AGENT=my-bot STEPS=2000000 RESUME=1
 ```
 
 **Watch a run: metrics.csv**
 
 ```sh
-column -s, -t out/metrics.csv | less -S
+column -s, -t agents/my-bot/out/metrics.csv | less -S
 ```
 
 One row per rollout: mean return, losses, entropy, log-std, clip fraction,
 steps/second.
 
-**Train another mode**
+**An agent for another mode**
 
 Some environments publish several modes — separate ladders with separate
-engines (Dance-Off's `servo-assist` vs `raw-torque`, say). The engine you
-download IS the mode:
+engines (Dance-Off's `servo-assist` vs `raw-torque`, say). A mode is part
+of an agent's identity, fixed at create time:
 
 ```sh
-task info  ENV=dance-off MODE=raw-torque
-task train ENV=dance-off MODE=raw-torque
-task match ENV=dance-off        # the bundle's lockstep.toml picks the mode
+task create-agent NAME=torquey ENV=dance-off MODE=raw-torque
+task train AGENT=torquey
+task match AGENT=torquey        # always the raw-torque engine — agent.toml says so
 ```
+
+Two agents on two modes coexist happily: the engine cache is keyed by
+(environment, mode), so neither ever clobbers the other's engine.
 
 **Two seats learning at once**
 
@@ -198,44 +222,44 @@ of self-play. The exported artifact is unchanged.
 **Iterate on export without retraining**
 
 ```sh
-.venv/bin/python -m train.main --env dance-off --from-weights out/policy.pt --engine out/engine.wasm
+.venv/bin/python -m train.main --agent my-bot --from-weights agents/my-bot/out/policy.pt
 ```
 
 **Upload a new revision of an existing agent**
 
 ```sh
-task upload AGENT_ID=<id-from-the-first-upload>
+task upload AGENT=my-bot AGENT_ID=<id-from-the-first-upload>
 ```
 
-**Pin or change the release version**
+**Refresh after a release bump**
 
 ```sh
-task engine ENV=dance-off VERSION=0.8.0
+task create-agent NAME=my-bot ENV=dance-off    # regenerates interface.py + agent.toml
+task build AGENT=my-bot                        # rebuild against the new release
 ```
 
 The platform API names the current release (its directory on the CDN is
-unguessable, so the path is never derived from the slug); `VERSION=` asserts
-that release's version rather than selecting an older one. For an
+unguessable, so the path is never derived from the slug). For an
 assessment-only environment the API answers only invited candidates — put
-your key in `.env` as `LOCKSTEP_API_KEY` (the same one `task upload` uses)
-before `task engine`. The staged bundle declares the payload schema version
-read from the engine itself, so the api will refuse a stale bundle rather
-than let it misread observations.
+your key in `.env` as `LOCKSTEP_API_KEY` (the same one `task upload` uses).
+The staged bundle declares the payload schema version read from the engine
+itself, so the api will refuse a stale bundle rather than let it misread
+observations.
 
 **Validate a bundle without uploading**
 
 ```sh
-lockstep agent validate --bundle out/agent-bundle
+lockstep agent validate --bundle agents/my-bot/out/bundle
 ```
 
 **Taking a hiring assessment**
 
 Some companies use Lockstep environments as hands-on hiring assessments. If
 you received an invite link, the flow is this exact repo: practice locally
-(`task train` / `task match`), `task upload` your best agent, then **seal**
-it from your invite page. The invite page lists your verified agents — the
-upload you just made is what you seal. Practice runs and the final
-evaluation both run the same engine you trained against here.
+(`task build` / `task train` / `task match`), `task upload` your best agent,
+then **seal** it from your invite page. The invite page lists your verified
+agents — the upload you just made is what you seal. Practice runs and the
+final evaluation both run the same engine you built against here.
 
 </details>
 
@@ -245,14 +269,14 @@ evaluation both run the same engine you trained against here.
 There is nothing to add to this repo when a new environment releases:
 
 ```sh
-task info   ENV=panda-pick    # read it
-task engine ENV=panda-pick    # resolve + fetch its current release
-task train  ENV=panda-pick    # the network is built from ITS declaration
+task info ENV=panda-pick                       # read it
+task create-agent NAME=picky ENV=panda-pick    # scaffold from ITS declaration
+task train AGENT=picky                         # the network is built from the same declaration
 ```
 
 `train/core/discovery.py` resolves the release through the platform API
 (`LOCKSTEP_API_URL`; artifacts then come from the CDN, `LOCKSTEP_CDN_URL`);
-the engine's tensor-wire declaration does the rest.
+the engine's own declaration does the rest.
 
 </details>
 
@@ -260,21 +284,27 @@ the engine's tensor-wire declaration does the rest.
 <summary><strong>What's in the box</strong></summary>
 
 ```
-Taskfile.yml            the whole surface (doctor/quickstart/setup/info/engine/train/match/upload/test)
+Taskfile.yml            the whole surface (doctor/quickstart/setup/create-agent/info/train/build/match/upload/test)
 train/
   doctor.py             `task doctor` — prerequisites, each with its fix
-  main.py               train → export → parity-check → stage
+  scaffold.py           `task create-agent` — agent projects from the engine's declaration
+  agents.py             agents/<name>/agent.toml — identity + AGENT= resolution
+  build.py              `task build` — python export / rust cargo / c wasi-sdk → bundle
+  toolchain.py          `task setup LANGS=` — detect-first toolchain provisioning
+  main.py               `task train` — train → export → parity-check → stage
   core/discovery.py     release resolution through the platform API
-  core/engine.py        engine + generic-shell download, .url stamps
-  core/policy.py        the network, derived from the declared spaces
+  core/engine.py        the keyed engine cache (out/cache/<env>/<mode>/)
+  core/policy.py        the trainable network, derived from the declared spaces
   core/train.py         a small real PPO loop (vectorized, SAME_STEP)
   core/self_play.py     shared-policy self-play over the PettingZoo view
   core/export.py        ONNX export + torch/onnxruntime parity proof
   core/stage.py         the submittable bundle (manifest v2)
-examples/
-  scripted_agent.py     a no-training agent through the same pipeline
-  rust-agent/           a pure-Rust agent: hand-written wire decoder, no deps
-tests/                  hermetic tests + engine-backed semantics proofs
+reference/
+  rust-wire/            the hand-written Rust wire reader the rust scaffold vendors, pinned by the spec goldens
+  c-wire/               its C99 twin (wire.h/wire.c), pinned by the same goldens
+wit/                    the agent WIT world every wasm agent targets (vendored)
+agents/                 YOUR agents (created by task create-agent; build products gitignored)
+tests/                  hermetic tests + engine-backed semantics proofs + scaffold compile tests
 ```
 
 </details>
@@ -283,17 +313,28 @@ tests/                  hermetic tests + engine-backed semantics proofs
 <summary><strong>The wasm story</strong></summary>
 
 Your agent ships as a WASM **component** — either the generic ONNX shell
-plus your `policy.onnx` (the trained path above), or a component you wrote
-yourself. `examples/rust-agent/` is the second kind: ~200 lines of Rust
-that decode the tensor wire BY HAND (no generated code, no private
-dependencies — the wire is a published spec) and answer every tick. It
-plays a visible sway on Dance-Off and the correct neutral on any other
-environment, and the same `task match` runs it:
+plus your `policy.onnx` (the python paths above), or a component you wrote
+yourself. That second kind is the advanced track, and it is one command per
+language:
 
 ```sh
-task rust-agent
-task match BUNDLE=examples/rust-agent/target/wasm32-wasip2/release/rust_agent.wasm
+task setup LANGS=rust                                  # once
+task create-agent NAME=ferrous ENV=dance-off LANG=rust
+task build AGENT=ferrous && task match AGENT=ferrous
 ```
+
+```sh
+task setup LANGS=c                                     # once — finds /opt/wasi-sdk or $WASI_SDK, else downloads
+task create-agent NAME=clanger ENV=dance-off LANG=c
+task build AGENT=clanger && task match AGENT=clanger
+```
+
+The scaffold is a complete project: the vendored WIT world, a hand-written
+wire reader (`wire.rs` / `wire.c` — ~300 dependency-free lines,
+re-implemented from the published spec and pinned by its goldens under
+`reference/`), a generated `interface.rs` / `interface.h` naming every
+declared slice, and a stub that answers the neutral action until you edit
+it. No ONNX, no Python at match time — `on-tick` in, action out.
 
 Determinism is the platform's core bet: the engine is bit-identical across
 machines, so a local match IS a ranked match with different seats. The
@@ -303,17 +344,19 @@ archive your match writes (`out/archive.bin`) drops straight onto
 </details>
 
 <details>
-<summary><strong>The tensor wire</strong></summary>
+<summary><strong>The Lockstep wire</strong></summary>
 
-Every engine describes itself at seat-init: named observation/action
-tensors with dtype, shape, bounds (per-element where it matters),
-documented slices with units, free-form metadata, and the seat's brief —
-goal, reward, what ends an episode. Little-endian, no codegen — the spec
-fits on a page ([docs/wire.md](docs/wire.md) — vendored here from the
-platform's private interface repo at every release), and `examples/rust-agent/src/wire.rs` re-implements it from scratch
-to prove the point. The generic ONNX shell, the Python env, `task info`,
-the environment's Interface page and your hand-written agent all read the
-same declaration.
+Every engine describes itself at seat-init: named observations and actions
+with dtype, shape, bounds (per-element where it matters), documented
+slices with units, free-form metadata, and the seat's brief — goal,
+reward, what ends an episode. Every tick after that is positional,
+near-raw blobs the declaration explains. Little-endian, no codegen — the
+spec fits on a page ([docs/wire.md](docs/wire.md) — vendored here from the
+platform's interface repo at every release), and `reference/rust-wire` +
+`reference/c-wire` re-implement it from scratch to prove the point. The
+generic ONNX shell, the Python env, `task info`, the environment's
+Interface page, your generated interface files and your hand-written agent
+all read the same declaration.
 
 </details>
 

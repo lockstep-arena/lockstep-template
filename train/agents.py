@@ -7,8 +7,8 @@ the engine from it, so an agent can never be run against the wrong mode::
 
     [agent]
     name = "my-bot"
-    env = "dance-off"
-    mode = "servo-assist"
+    env = "<slug>"
+    mode = "<mode>"
     lang = "python"                    # python | rust | c
 
     [release]                          # what the scaffold was generated from

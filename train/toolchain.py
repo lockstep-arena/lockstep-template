@@ -69,7 +69,14 @@ def find_wasi_sdk() -> Path | None:
 
 
 def find_wit_bindgen() -> str | None:
-    return shutil.which("wit-bindgen")
+    found = shutil.which("wit-bindgen")
+    if found:
+        return found
+    exe = "wit-bindgen.exe" if os.name == "nt" else "wit-bindgen"
+    if TOOLCHAINS.is_dir():
+        for cand in sorted(TOOLCHAINS.glob(f"wit-bindgen-*/{exe}")):
+            return str(cand)
+    return None
 
 
 def install_wasi_sdk() -> Path:
@@ -95,22 +102,61 @@ def install_wasi_sdk() -> Path:
     return target
 
 
+def _wit_bindgen_asset() -> tuple[str, str]:
+    """(asset filename, archive kind) for this machine's prebuilt release."""
+    mach = platform.machine().lower()
+    arch = "aarch64" if mach in ("arm64", "aarch64") else "x86_64"
+    if os.name == "nt":
+        return f"wit-bindgen-{WIT_BINDGEN_VERSION}-{arch}-windows.zip", "zip"
+    osname = "macos" if sys.platform == "darwin" else "linux"
+    return f"wit-bindgen-{WIT_BINDGEN_VERSION}-{arch}-{osname}.tar.gz", "tar"
+
+
 def install_wit_bindgen() -> str:
     found = find_wit_bindgen()
     if found:
         return found
-    if not shutil.which("cargo"):
-        raise SystemExit(
-            "wit-bindgen is not on PATH and cargo is unavailable to install it — "
-            "install one: https://github.com/bytecodealliance/wit-bindgen/releases "
-            "(put `wit-bindgen` on PATH) or install Rust (https://rustup.rs) and re-run"
-        )
-    print(f"→ cargo install wit-bindgen-cli@{WIT_BINDGEN_VERSION}", file=sys.stderr)
-    subprocess.run(
-        ["cargo", "install", f"wit-bindgen-cli@{WIT_BINDGEN_VERSION}", "--locked"],
-        check=True,
+    asset, kind = _wit_bindgen_asset()
+    url = (
+        "https://github.com/bytecodealliance/wit-bindgen/releases/download/"
+        f"v{WIT_BINDGEN_VERSION}/{asset}"
     )
-    return shutil.which("wit-bindgen") or "wit-bindgen"
+    TOOLCHAINS.mkdir(parents=True, exist_ok=True)
+    archive = TOOLCHAINS / asset
+    print(f"→ downloading {url}", file=sys.stderr)
+    try:
+        with urllib.request.urlopen(url) as resp:
+            archive.write_bytes(resp.read())
+    except OSError:
+        # No prebuilt for this machine (or offline registry) — cargo fallback.
+        if not shutil.which("cargo"):
+            raise SystemExit(
+                f"could not download {url} and cargo is unavailable — install "
+                "wit-bindgen yourself: https://github.com/bytecodealliance/wit-bindgen/releases"
+            ) from None
+        print(f"→ cargo install wit-bindgen-cli@{WIT_BINDGEN_VERSION}", file=sys.stderr)
+        subprocess.run(
+            ["cargo", "install", f"wit-bindgen-cli@{WIT_BINDGEN_VERSION}", "--locked"],
+            check=True,
+        )
+        return shutil.which("wit-bindgen") or "wit-bindgen"
+    if kind == "zip":
+        import zipfile
+
+        with zipfile.ZipFile(archive) as zf:
+            zf.extractall(TOOLCHAINS)
+    else:
+        with tarfile.open(archive) as tf:
+            tf.extractall(TOOLCHAINS, filter="data")
+    archive.unlink()
+    found = find_wit_bindgen()
+    if not found:
+        raise SystemExit(f"extracted {asset} but found no wit-bindgen binary under {TOOLCHAINS}")
+    # The release ships without the exec bit on some archives.
+    if os.name != "nt":
+        os.chmod(found, 0o755)
+    print(f"→ wit-bindgen at {found}", file=sys.stderr)
+    return found
 
 
 def check(lang: str) -> list[tuple[str, str | None, str]]:

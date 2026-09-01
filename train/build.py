@@ -142,9 +142,10 @@ def build_c(cfg: AgentConfig) -> Path:
     from .toolchain import find_wasi_sdk, find_wit_bindgen
 
     sdk = find_wasi_sdk()
-    if sdk is None or find_wit_bindgen() is None:
+    wit_bindgen = find_wit_bindgen()
+    if sdk is None or wit_bindgen is None:
         raise SystemExit("the C toolchain is missing — run: task setup LANGS=c")
-    env = dict(os.environ, WASI_SDK=str(sdk))
+    env = dict(os.environ, WASI_SDK=str(sdk), WIT_BINDGEN=wit_bindgen)
     script = cfg.dir / "build.sh"
     subprocess.run(["bash", str(script)], check=True, env=env)
     component = cfg.dir / "out" / "agent.wasm"
