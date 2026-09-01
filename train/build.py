@@ -138,19 +138,47 @@ def build_rust(cfg: AgentConfig) -> Path:
     return bundle_component(cfg, component)
 
 
-def build_c(cfg: AgentConfig) -> Path:
+def compile_c_agent(agent_dir: Path) -> Path:
+    """The C build, portably (no bash — Windows resolves `bash` to the WSL
+    stub): wit-bindgen world bindings, then one wasi-sdk clang line to a
+    wasm32-wasip2 component. The scaffold's build.sh is the same two steps
+    for running by hand on unix."""
     from .toolchain import find_wasi_sdk, find_wit_bindgen
 
     sdk = find_wasi_sdk()
     wit_bindgen = find_wit_bindgen()
     if sdk is None or wit_bindgen is None:
         raise SystemExit("the C toolchain is missing — run: task setup LANGS=c")
-    env = dict(os.environ, WASI_SDK=str(sdk), WIT_BINDGEN=wit_bindgen)
-    script = cfg.dir / "build.sh"
-    subprocess.run(["bash", str(script)], check=True, env=env)
-    component = cfg.dir / "out" / "agent.wasm"
+    clang = sdk / "bin" / ("clang.exe" if os.name == "nt" else "clang")
+    subprocess.run(
+        [wit_bindgen, "c", "wit", "--world", "agent", "--out-dir", "gen"],
+        check=True,
+        cwd=agent_dir,
+    )
+    (agent_dir / "out").mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            str(clang),
+            "--target=wasm32-wasip2",
+            "-mexec-model=reactor",
+            "-O2",
+            "-o",
+            "out/agent.wasm",
+            "agent.c",
+            "wire.c",
+            "gen/agent.c",
+            "gen/agent_component_type.o",
+        ],
+        check=True,
+        cwd=agent_dir,
+    )
+    return agent_dir / "out" / "agent.wasm"
+
+
+def build_c(cfg: AgentConfig) -> Path:
+    component = compile_c_agent(cfg.dir)
     if not component.is_file():
-        raise SystemExit(f"{script} succeeded but {component} is missing")
+        raise SystemExit(f"the C build succeeded but {component} is missing")
     return bundle_component(cfg, component)
 
 

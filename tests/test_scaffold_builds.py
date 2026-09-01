@@ -9,7 +9,6 @@ unconditionally.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 
@@ -66,11 +65,11 @@ def test_rust_scaffold_compiles_to_a_component(agent_env):
     reason="no wasi-sdk/wit-bindgen — task setup LANGS=c",
 )
 def test_c_scaffold_compiles_to_a_component(agent_env):
+    from train.build import compile_c_agent
+
     cfg = cfg_for("c")
     scaffold_mod.scaffold_c(cfg, synthetic_init(), BUDGETS, "t")
-    env = dict(os.environ, WASI_SDK=str(find_wasi_sdk()), WIT_BINDGEN=str(find_wit_bindgen()))
-    subprocess.run(["bash", str(cfg.dir / "build.sh")], check=True, env=env)
-    wasm = cfg.dir / "out" / "agent.wasm"
+    wasm = compile_c_agent(cfg.dir)
     assert wasm.is_file()
     _assert_component(wasm)
 
