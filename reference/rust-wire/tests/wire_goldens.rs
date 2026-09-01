@@ -2,7 +2,7 @@
 //! (`tests/fixtures/*.bin`, vendored alongside `docs/wire.md` from the
 //! platform's interface repo). If these pass, the decoder speaks the same wire as every engine.
 
-use rust_agent::wire::{encode_input, f32_bytes, Dtype, SeatInit, View};
+use lockstep_wire_reference::wire::{encode_input, f32_bytes, Dtype, SeatInit, View};
 
 const SEAT_INIT: &[u8] = include_bytes!("fixtures/seat_init.bin");
 const VIEW: &[u8] = include_bytes!("fixtures/view.bin");
@@ -41,14 +41,14 @@ fn seat_init_golden_decodes() {
         "After 5 ticks, or the moment the body falls."
     );
 
-    let action = init.action("action").expect("f32 action tensor");
+    let action = init.action("action").expect("f32 action value");
     assert_eq!(action.dtype, Dtype::F32);
     assert_eq!(action.numel(), 3);
     assert_eq!(action.slice("torque").map(|s| s.len), Some(3));
     // Neutral = midpoint of finite bounds: [-1, 1] → 0.
     assert_eq!(action.neutral_f32(), [0.0, 0.0, 0.0]);
 
-    let mode = init.action("mode").expect("i32 action tensor");
+    let mode = init.action("mode").expect("i32 action value");
     assert_eq!(mode.dtype, Dtype::I32);
     // [0, 3] → 1.5 midpoint (kept as f32; encoding truncates per dtype).
     assert_eq!(mode.neutral_f32(), [1.5]);
@@ -60,9 +60,9 @@ fn view_golden_decodes_zero_copy() {
     assert_eq!(view.tick, 42);
     assert!((view.reward - -0.125).abs() < 1e-6);
     assert!(view.done);
-    assert_eq!(view.tensors.len(), 2);
-    assert_eq!(view.tensors[0], [0u8, 1, 2, 3, 4, 5, 6, 255]);
-    let agent: Vec<f32> = view.tensors[1]
+    assert_eq!(view.values.len(), 2);
+    assert_eq!(view.values[0], [0u8, 1, 2, 3, 4, 5, 6, 255]);
+    let agent: Vec<f32> = view.values[1]
         .as_chunks::<4>()
         .0
         .iter()

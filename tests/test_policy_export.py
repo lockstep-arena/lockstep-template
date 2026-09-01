@@ -1,7 +1,7 @@
 """The generic network + export seam, with no engine at all.
 
 Builds the policy from a synthetic Dict space of the two stream kinds the
-tensor wire carries today — a channel-first uint8 image and a float32
+Lockstep wire carries today — a channel-first uint8 image and a float32
 vector — exports it, and holds torch and onnxruntime to the same numbers.
 This is the whole train-side contract in one test: one ONNX input per obs
 tensor BY NAME, one ``action`` output, fixed batch of 1.

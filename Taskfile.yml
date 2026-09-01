@@ -1,17 +1,22 @@
 # The template's entire surface. Every task uses the repo-local .venv
 # explicitly — no shell activation, no global installs.
 #
-# ENV=<slug> parameterizes everything: which environment's release to fetch,
-# train against and submit to. There are no per-environment packages and no
-# per-environment config in this repo — the CDN's `latest.json` names the
-# release, and the engine wasm's own tensor-wire declaration describes the
-# whole interface. dance-off is only the DEFAULT, as the shipped reference
-# environment. Browse the catalog: https://lockstep.it/arenas
+# The unit of work is an AGENT (`agents/<name>/`, made by `task
+# create-agent`): its agent.toml names the environment, mode and language,
+# so train/build/match/upload can never pair it with the wrong engine.
+# AGENT= may be omitted whenever exactly one agent exists. Engines are
+# fetched lazily into a keyed cache (out/cache/<env>/<mode>/) — nothing to
+# download by hand, and switching environments can never clobber another
+# agent's engine. There are no per-environment packages and no
+# per-environment config in this repo — the platform API names the release,
+# and the engine wasm's own declaration describes the whole interface.
+# dance-off is only the DEFAULT, as the shipped reference environment.
+# Browse the catalog: https://lockstep.it/arenas
 version: "3"
 
 # Print what the task SAYS, not the shell line that says it. This is a
 # teaching repo: `task train` should read as its own progress output, not as
-# an echo of every `"{{.PY}}" -m train.core...` invocation ahead of it.
+# an echo of every `"{{.PY}}" -m train...` invocation ahead of it.
 silent: true
 
 dotenv: [".env"]
@@ -20,143 +25,188 @@ vars:
   VENV: "{{.ROOT_DIR}}/.venv"
   PY: "{{.VENV}}/bin/python"
   ENV: '{{.ENV | default "dance-off"}}'
+  LANGS: '{{.LANGS | default "python"}}'
 
 tasks:
   setup:
-    desc: "Create .venv and install the training stack (lockstep-train + torch/onnx). Nothing per-environment to install."
+    desc: "Provision toolchains. LANGS=python (default) | rust | c, comma-separated: python = .venv + the training stack; rust = wasm32-wasip2 target; c = wasi-sdk + wit-bindgen (detects /opt/wasi-sdk or $WASI_SDK first, else downloads into out/toolchains/). The ONE place that installs anything."
     cmds:
-      - python3 -m venv "{{.VENV}}"
-      - '"{{.VENV}}/bin/pip" install --upgrade pip'
-      - '"{{.VENV}}/bin/pip" install -r requirements.txt'
-      # The one Lockstep dependency. LOCKSTEP_TRAIN_SPEC overrides the PyPI
-      # spec for local development against a checkout/wheel — e.g.
-      #   task setup LOCKSTEP_TRAIN_SPEC="-e ../LOCKSTEP-PLATFORM/packages/mixed/lockstep-train[pettingzoo]"
-      - '"{{.VENV}}/bin/pip" install {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train[pettingzoo]>=0.4.0\""}}'
-      - 'echo "setup: ready — {{.ENV}}"'
-      - 'echo "next: task info ENV={{.ENV}} (what the environment is), then task train ENV={{.ENV}} — or task quickstart ENV={{.ENV}} for the whole loop in one go"'
+      - |
+        IFS=',' read -ra langs <<< "{{.LANGS}}"
+        for lang in "${langs[@]}"; do
+          case "$lang" in
+            python)
+              python3 -m venv "{{.VENV}}"
+              "{{.VENV}}/bin/pip" install --upgrade pip
+              "{{.VENV}}/bin/pip" install -r requirements.txt
+              # The one Lockstep dependency. LOCKSTEP_TRAIN_SPEC overrides the
+              # PyPI spec for local development against a checkout/wheel — e.g.
+              #   task setup LOCKSTEP_TRAIN_SPEC="-e ../LOCKSTEP-PLATFORM/packages/mixed/lockstep-train[pettingzoo]"
+              "{{.VENV}}/bin/pip" install {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train[pettingzoo]>=0.5.0\""}}
+              ;;
+            rust|c)
+              python3 -m train.toolchain install "$lang"
+              ;;
+            *)
+              echo "setup: unknown LANGS entry '$lang' (python, rust, c)" >&2; exit 1
+              ;;
+          esac
+          echo "setup: $lang ready"
+        done
+      - 'echo "next: task create-agent NAME=my-bot ENV={{.ENV}}  (add LANG=rust or LANG=c for the hand-written track)"'
 
-  engine:
-    desc: "Download the release's engine.wasm + the generic agent shell (no-op if unchanged). ENV= MODE= VERSION="
+  create-agent:
+    desc: "Scaffold agents/<NAME>/ from the engine's own declaration: generated interface file (regenerable) + a policy stub that is YOURS (never overwritten). NAME= ENV= MODE= LANG=python|rust|c FORCE=1 to re-scaffold under a changed identity."
+    preconditions:
+      - sh: test -x "{{.PY}}"
+        msg: "no .venv yet — run: task setup"
+      - sh: test -n "{{.NAME}}"
+        msg: "pass NAME=<agent-name> (and ENV=<slug>)"
     cmds:
-      # `latest.json` on the CDN names the current release; the engine and
-      # the generic ONNX agent shell are fetched from the same release
-      # directory. `.url` stamps make re-runs and ENV/MODE switches cheap.
-      - '"{{.PY}}" -m train.core.engine --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} {{if .VERSION}}--version "{{.VERSION}}"{{end}} --out out'
+      # LANG is also the POSIX locale variable, so a value that is not one
+      # of ours and LOOKS like a locale (C.UTF-8, en_US.UTF-8, POSIX, C)
+      # means "not passed" — anything else non-empty is a real typo.
+      - |
+        LANG_IN="{{.LANG}}"
+        case "$LANG_IN" in
+          python|rust|c) LANG_ARG="--lang $LANG_IN" ;;
+          ""|C|POSIX|*.*|*_*) LANG_ARG="" ;;
+          *) echo "create-agent: LANG=$LANG_IN is not one of python | rust | c" >&2; exit 2 ;;
+        esac
+        "{{.PY}}" -m train.scaffold --name "{{.NAME}}" --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} $LANG_ARG {{if .FORCE}}--force{{end}}
 
   info:
-    desc: "Print the environment's brief and wire layout in the terminal — goal, reward, what ends an episode, every tensor and slice with units, the budgets — from the engine you will train against. ENV= MODE= (the same page as the Interface tab)"
-    deps: [engine]
+    desc: "Print the environment's brief and wire layout in the terminal — goal, reward, what ends an episode, every value and slice with units, the budgets — from the engine you will train against. ENV= MODE= (the same page as the Interface tab)"
     cmds:
-      # Runs the fetched engine for one reset and prints what THAT engine
-      # declares, so what you read is exactly what `task train` builds
-      # against. `--env` (the platform's record) is the no-download
-      # alternative: python -m lockstep_train.info --env <slug>.
-      - '"{{.PY}}" -m lockstep_train.info --engine out/engine.wasm'
+      # Lazily fetches this env/mode's engine into the keyed cache
+      # (out/cache/<env>/<mode>/ — no-op when current), then runs THAT
+      # engine for one reset and prints what it declares, so what you read
+      # is exactly what `task train` builds against. `--env` (the
+      # platform's record) is the no-download alternative:
+      # python -m lockstep_train.info --env <slug>.
+      - |
+        ENGINE="$("{{.PY}}" -m train.core.engine --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} {{if .VERSION}}--version "{{.VERSION}}"{{end}} --print-path)"
+        "{{.PY}}" -m lockstep_train.info --engine "$ENGINE"
 
   doctor:
-    desc: "Check this machine for everything the template needs — Python version, the venv, lockstep-train, the lockstep CLI, Task, LOCKSTEP_API_KEY, the Rust toolchain for the example agent — and say exactly what is missing and how to fix it."
+    desc: "Check this machine for everything the template needs — Python, Task, the lockstep CLI, the venv, per-language toolchains for the agents you actually have — and say exactly what is missing and how to fix it."
     cmds:
       # Deliberately runs on the SYSTEM python: the venv is one of the
       # things it checks, so it cannot depend on it.
       - python3 -m train.doctor
 
   quickstart:
-    desc: "Zero decisions: setup → fetch the engine → build the scripted agent → run a real local match → hand you the archive to drop on lockstep.it/replay. ENV="
+    desc: "Zero decisions: setup → create-agent (python) → build → a real local match → hand you the archive to drop on lockstep.it/replay. ENV="
+    vars:
+      NAME: '{{.NAME | default "my-bot"}}'
     cmds:
       - task: setup
-        vars: { ENV: "{{.ENV}}" }
-      - task: engine
-        vars: { ENV: "{{.ENV}}" }
-      - task: scripted
-        vars: { ENV: "{{.ENV}}" }
+      - task: create-agent
+        vars: { NAME: "{{.NAME}}", ENV: "{{.ENV}}" }
+      - task: build
+        vars: { AGENT: "{{.NAME}}" }
       - task: match
-        vars: { ENV: "{{.ENV}}", BUNDLE: "out/scripted-bundle" }
+        vars: { AGENT: "{{.NAME}}" }
       - 'echo ""'
-      - 'echo "quickstart: done — out/archive.bin is a real {{.ENV}} match with the scripted agent in every seat."'
+      - 'echo "quickstart: done — out/archive.bin is a real {{.ENV}} match with agents/{{.NAME}} in every seat."'
       - 'echo "Watch it:   drop out/archive.bin on https://lockstep.it/replay"'
-      - 'echo "Read it:    task info ENV={{.ENV}}   (the brief and the wire, in this terminal)"'
-      - 'echo "Train one:  task train ENV={{.ENV}}  then task match ENV={{.ENV}}, then task upload ENV={{.ENV}}"'
+      - 'echo "Read it:    task info ENV={{.ENV}}    (the brief and the wire, in this terminal)"'
+      - 'echo "Make it yours: edit agents/{{.NAME}}/policy.py, then task build AGENT={{.NAME}}"'
+      - 'echo "Train it:      task train AGENT={{.NAME}}  then task match, then task upload"'
 
   train:
-    desc: "PPO → ONNX → parity check → stage out/agent-bundle. ENV= MODE= STEPS=8192 NUM_ENVS=(cores-2, max 8) RESUME=1 to continue a crashed run. PARALLEL=1 trains BOTH seats at once (one shared policy over the generic PettingZoo env) on multi-seat environments"
-    deps: [engine]
+    desc: "PPO → ONNX → parity check → stage agents/<AGENT>/out/bundle. AGENT= (defaults to the sole agent; python agents only) STEPS=8192 NUM_ENVS=(cores-2, max 8) RESUME=1 to continue a crashed run. PARALLEL=1 trains BOTH seats at once (one shared policy over the generic PettingZoo env) on multi-seat environments"
     vars:
       STEPS: '{{.STEPS | default "8192"}}'
+    preconditions:
+      - sh: test -x "{{.PY}}"
+        msg: "no .venv yet — run: task setup"
     cmds:
+      # env/mode/engine all come from the agent's own agent.toml via the
+      # keyed cache — a mode mismatch is impossible.
       - >-
-        "{{.PY}}" -m train.main --env "{{.ENV}}" --steps {{.STEPS}}
+        "{{.PY}}" -m train.main {{if .AGENT}}--agent "{{.AGENT}}"{{end}} --steps {{.STEPS}}
         {{if .NUM_ENVS}}--num-envs {{.NUM_ENVS}}{{end}}
         {{if .RESUME}}--resume{{end}}
         {{if .PARALLEL}}--parallel{{end}}
-        --engine out/engine.wasm
-        --shell out/agent-onnx.wasm
 
-  scripted:
-    desc: "Build the NON-trained example agent (examples/scripted_agent.py) → out/scripted-bundle. ENV="
-    deps: [engine]
+  build:
+    desc: "Build one agent into its submittable bundle (agents/<AGENT>/out/bundle). AGENT= (defaults to the sole agent). python: export YOUR policy.py (no training) with the generic ONNX shell; rust/c: compile the wasm component. Language comes from agent.toml — you never say it."
+    preconditions:
+      - sh: test -x "{{.PY}}"
+        msg: "no .venv yet — run: task setup"
     cmds:
-      - '"{{.PY}}" -m examples.scripted_agent --env "{{.ENV}}"'
-
-  rust-agent:
-    desc: "Build the pure-Rust example agent → a bare wasm component (needs rustup target add wasm32-wasip2)."
-    cmds:
-      - cargo build --release --target wasm32-wasip2 --manifest-path examples/rust-agent/Cargo.toml
-      - 'echo "→ examples/rust-agent/target/wasm32-wasip2/release/rust_agent.wasm"'
-      - 'echo "Run it:  task match BUNDLE=examples/rust-agent/target/wasm32-wasip2/release/rust_agent.wasm"'
+      - '"{{.PY}}" -m train.build {{if .AGENT}}--agent "{{.AGENT}}"{{end}}'
 
   match:
-    desc: "Run a real local match with a bundle in both seats. ENV= BUNDLE=out/agent-bundle (the engine's MODE comes from the bundle's lockstep.toml; MODE= only matters for a bare .wasm)"
-    vars:
-      BUNDLE: '{{.BUNDLE | default "out/agent-bundle"}}'
+    desc: "Run a real local match with an agent's bundle in every seat. AGENT= (defaults to the sole agent) — or BUNDLE=<dir|.wasm> for a bundle from anywhere; ENV=/MODE= only matter with BUNDLE="
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
-      - sh: test -f {{.BUNDLE}}/lockstep.toml || test -f {{.BUNDLE}}
-        msg: "nothing at {{.BUNDLE}} — `task train`, `task scripted`, or `task rust-agent` first"
     cmds:
-      # NOT the plain `engine` dep: that fetches the DEFAULT mode's engine
-      # when MODE= is unset, silently replacing the one `task train MODE=x`
-      # downloaded — and a mode-mismatched match doesn't fail, it plays out
-      # as an agent that can't read a single observation. --bundle lets the
-      # bundle's own lockstep.toml pick the engine instead.
-      - '"{{.PY}}" -m train.core.engine --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} --bundle "{{.BUNDLE}}" --out out'
+      # The bundle's own lockstep.toml picks the mode (--bundle), and the
+      # keyed cache means fetching one mode's engine can never replace
+      # another's — the old mode-mismatch footgun (an agent that can't read
+      # a single observation) is structurally impossible.
       # --clamp-seats: both seats are this bundle; a solo environment clamps
       # to its single seat, a duel keeps two.
       - |
-        lockstep match run --slug "{{.ENV}}" \
-          --engine out/engine.wasm \
-          --agents {{.BUNDLE}} {{.BUNDLE}} \
+        set -e
+        if [ -n "{{.BUNDLE}}" ]; then
+          BUNDLE="{{.BUNDLE}}"; MATCH_ENV="{{.ENV}}"
+        else
+          eval "$("{{.PY}}" -m train.agents shellvars "{{.AGENT}}")"
+          BUNDLE="$AGENT_BUNDLE"; MATCH_ENV="$AGENT_ENV"
+        fi
+        if [ ! -f "$BUNDLE/lockstep.toml" ] && [ ! -f "$BUNDLE" ]; then
+          echo "no bundle at $BUNDLE — build it first: task build{{if .AGENT}} AGENT={{.AGENT}}{{end}}" >&2
+          exit 1
+        fi
+        ENGINE="$("{{.PY}}" -m train.core.engine --env "$MATCH_ENV" {{if .MODE}}--mode "{{.MODE}}"{{end}} --bundle "$BUNDLE" --print-path)"
+        lockstep match run --slug "$MATCH_ENV" \
+          --engine "$ENGINE" \
+          --agents "$BUNDLE" "$BUNDLE" \
           --clamp-seats \
           --seed-hex 0703 \
           --out out/archive.bin
-      - echo "✓ match archived → out/archive.bin"
-      - 'echo "Watch it: drop out/archive.bin on https://lockstep.it/replay"'
+        echo "✓ match archived → out/archive.bin"
+        echo "Watch it: drop out/archive.bin on https://lockstep.it/replay"
 
   upload:
-    desc: "Upload the bundle to compete (or to seal for an assessment). Needs LOCKSTEP_API_KEY in .env. ENV= NAME=my-agent AGENT_ID=<id> for a revision. BUNDLE=out/agent-bundle"
-    vars:
-      BUNDLE: '{{.BUNDLE | default "out/agent-bundle"}}'
-      NAME: '{{.NAME | default "my-agent"}}'
+    desc: "Upload an agent's bundle to compete (or to seal for an assessment). Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision."
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
-      - sh: test -f {{.BUNDLE}}/lockstep.toml
-        msg: "no bundle at {{.BUNDLE}} — run: task train (or task scripted)"
       - sh: test -n "${LOCKSTEP_API_KEY:-}"
         msg: "LOCKSTEP_API_KEY not set — copy .env.example to .env and fill it in"
     cmds:
       - |
         set -e
+        eval "$("{{.PY}}" -m train.agents shellvars "{{.AGENT}}")"
+        BUNDLE="$AGENT_BUNDLE"
+        if [ ! -f "$BUNDLE/lockstep.toml" ]; then
+          echo "no bundle at $BUNDLE — build it first: task build AGENT=$AGENT_NAME" >&2
+          exit 1
+        fi
+        DISPLAY_NAME="{{.NAME}}"; [ -n "$DISPLAY_NAME" ] || DISPLAY_NAME="$AGENT_NAME"
         if [ -n "{{.AGENT_ID}}" ]; then
-          lockstep agent upload --bundle "{{.BUNDLE}}" --agent-id "{{.AGENT_ID}}"
+          lockstep agent upload --bundle "$BUNDLE" --agent-id "{{.AGENT_ID}}"
         else
-          lockstep agent upload --bundle "{{.BUNDLE}}" \
-            --display-name "{{.NAME}}" --environment-id "{{.ENV}}"
+          lockstep agent upload --bundle "$BUNDLE" \
+            --display-name "$DISPLAY_NAME" --environment-id "$AGENT_ENV"
         fi
 
   test:
-    desc: "Run the template's own tests. Hermetic ones always run; engine-backed ones (SAME_STEP semantics) need out/engine.wasm (task engine) or LOCKSTEP_TEST_ENGINE=<path>."
+    desc: "Run the template's own tests: pytest (hermetic always; engine-backed when a cached engine exists or LOCKSTEP_TEST_ENGINE is set), the Rust wire reference vs the spec goldens, and — when a C compiler is present — the C wire reference vs the same goldens."
     cmds:
       - '"{{.VENV}}/bin/pip" install --quiet pytest'
       - '"{{.PY}}" -m pytest tests -q'
-      - cargo test --manifest-path examples/rust-agent/Cargo.toml --quiet
+      - cargo test --manifest-path reference/rust-wire/Cargo.toml --quiet
+      - |
+        if command -v cc >/dev/null 2>&1; then
+          mkdir -p out
+          cc -std=c99 -Wall -Wextra -Werror -o out/test_wire reference/c-wire/test_wire.c reference/c-wire/wire.c -lm
+          ./out/test_wire reference/rust-wire/tests/fixtures
+        else
+          echo "test: no C compiler on PATH — skipping the C wire reference (CI runs it)"
+        fi

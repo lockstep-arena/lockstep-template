@@ -478,3 +478,11 @@ tmbootpicker.efi
 # Log files created by default by the nohup command
 nohup.out
 examples/rust-agent/target/
+
+# ── Lockstep template ────────────────────────────────────────────────
+# Per-agent build products: wasm targets, generated WIT bindings,
+# checkpoints/onnx/bundles. The agent's SOURCE (agent.toml, interface
+# files, your policy) is yours to commit.
+agents/*/target/
+agents/*/gen/
+agents/*/out/

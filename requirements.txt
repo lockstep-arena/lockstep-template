@@ -2,7 +2,7 @@
 # packages, full stop. `task setup` additionally installs `lockstep-train`
 # (the platform's environment-agnostic wasm-stepping host); everything
 # per-environment comes from the CDN release and the engine's own
-# tensor-wire declaration at runtime.
+# declaration at runtime.
 gymnasium>=1.0
 # The multi-agent API for `task train PARALLEL=1` (both seats learning at
 # once, on any multi-seat environment).

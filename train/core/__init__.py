@@ -1,6 +1,6 @@
 """Environment-agnostic training core.
 
-Everything in here is parameterized by the engine wasm's own tensor-wire
+Everything in here is parameterized by the engine wasm's own Lockstep-wire
 declaration (surfaced as Gymnasium spaces by ``lockstep_train``) and the
 CDN release metadata (see :mod:`train.core.discovery`). There are no
 per-environment packages to import — naming an environment anywhere in this

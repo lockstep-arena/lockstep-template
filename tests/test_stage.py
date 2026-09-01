@@ -34,5 +34,5 @@ def test_stage_without_the_shell_names_the_fix(tmp_path):
     onnx.write_bytes(b"x")
     import pytest
 
-    with pytest.raises(SystemExit, match="task engine ENV=panda-pick"):
+    with pytest.raises(SystemExit, match="task info ENV=panda-pick"):
         stage("panda-pick", "default", 1, onnx, tmp_path / "missing.wasm", tmp_path / "b")
