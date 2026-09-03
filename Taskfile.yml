@@ -159,6 +159,10 @@ tasks:
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
+      # The flags below need CLI >= 0.1.5; an older one fails with
+      # "unexpected argument '--clamp-seats'", which says nothing useful.
+      - sh: lockstep match run --help 2>/dev/null | grep -q -- '--clamp-seats'
+        msg: "lockstep CLI is too old for task match (needs 0.1.5+) — update it: curl -fsSL https://dl.lockstep.it/install.sh | sh   (task doctor checks this too)"
     cmds:
       # The bundle's own lockstep.toml picks the mode (--bundle), and the
       # keyed cache means fetching one mode's engine can never replace

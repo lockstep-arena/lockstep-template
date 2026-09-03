@@ -73,17 +73,43 @@ def check_task() -> Check:
     return Check("Task", True, True, f"{out or 'present'} at {path}")
 
 
+#: The oldest CLI whose `match run` takes every flag `task match` passes
+#: (`--clamp-seats` arrived in 0.1.5). The installer always fetches the
+#: newest, so "update" is the whole fix.
+MIN_CLI = (0, 1, 5)
+
+
+def _parse_version(text: str) -> tuple[int, ...] | None:
+    """`lockstep 0.1.5` → (0, 1, 5); anything unparseable → None."""
+    for word in text.split():
+        parts = word.split(".")
+        if len(parts) >= 2 and all(p.isdigit() for p in parts):
+            return tuple(int(p) for p in parts)
+    return None
+
+
 def check_cli() -> Check:
     path = shutil.which("lockstep")
+    install = INSTALL_CLI["nt" if os.name == "nt" else "posix"]
     if not path:
         return Check(
             "lockstep CLI",
             False,
             True,
             "not on PATH — `task match` and `task upload` refuse to run without it",
-            INSTALL_CLI["nt" if os.name == "nt" else "posix"],
+            install,
         )
     _, out = _run([path, "--version"])
+    version = _parse_version(out)
+    if version is not None and version < MIN_CLI:
+        want = ".".join(str(n) for n in MIN_CLI)
+        return Check(
+            "lockstep CLI",
+            False,
+            True,
+            f"{out} at {path} — older than {want}, so `task match` fails on flags it does not know",
+            f"update it (the installer fetches the newest): {install}",
+        )
     return Check("lockstep CLI", True, True, f"{out or 'present'} at {path}")
 
 
