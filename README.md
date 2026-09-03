@@ -18,6 +18,10 @@ task doctor                      # what this machine is missing, and the exact f
 task quickstart ENV=go1-beacon   # setup → create-agent → build → a real local match
 ```
 
+Not sure which environment? `task envs` lists every slug the platform
+currently publishes, with its modes — nothing is named in this repo, so
+`ENV=` is always yours to pass.
+
 That ends with `out/archive.bin`: a whole match, scored by the real engine.
 Drop it on <https://lockstep.it/replay> to watch it. Then:
 
@@ -82,6 +86,7 @@ For `task upload` only: an API key. Copy `.env.example` to `.env` and fill in
 |---|---|
 | `task doctor` | Check the machine: Python, Task, the CLI, the venv, the API key, and — exactly when you have agents in that language — the Rust/C toolchains. Each with its fix. |
 | `task quickstart ENV=` | Zero decisions: `setup` → `create-agent` (python) → `build` → `match`, then hands you the archive. |
+| `task envs` | List the environments you can create an agent for, from the platform — the slugs `ENV=` takes. |
 | `task setup LANGS=` | Provision toolchains — the ONE place that installs anything. `python` (default): `.venv` + the training stack. `rust`: the wasm target. `c`: wasi-sdk + wit-bindgen (detects an existing install first). |
 | `task create-agent NAME= ENV= MODE= LANG=` | Scaffold `agents/<name>/` from the engine's own declaration: a generated interface file (regenerable) + a policy stub that is YOURS (never overwritten). |
 | `task info ENV= MODE=` | The environment's brief and wire layout, from the engine you will build against. |
@@ -201,13 +206,14 @@ steps/second.
 **An agent for another mode**
 
 Some environments publish several modes — separate ladders with separate
-engines (Dance-Off's `servo-assist` vs `raw-torque`, say). A mode is part
-of an agent's identity, fixed at create time:
+engines; `task envs` shows each environment's modes and `task info
+ENV=<slug>` describes them. A mode is part of an agent's identity, fixed at
+create time:
 
 ```sh
-task create-agent NAME=torquey ENV=dance-off MODE=raw-torque
+task create-agent NAME=torquey ENV=<slug> MODE=<mode>
 task train AGENT=torquey
-task match AGENT=torquey        # always the raw-torque engine — agent.toml says so
+task match AGENT=torquey        # always that mode's engine — agent.toml says so
 ```
 
 Two agents on two modes coexist happily: the engine cache is keyed by
@@ -234,7 +240,7 @@ task upload AGENT=my-bot AGENT_ID=<id-from-the-first-upload>
 **Refresh after a release bump**
 
 ```sh
-task create-agent NAME=my-bot ENV=dance-off    # regenerates interface.py + agent.toml
+task create-agent NAME=my-bot ENV=<slug>       # regenerates interface.py + agent.toml
 task build AGENT=my-bot                        # rebuild against the new release
 ```
 
@@ -284,7 +290,7 @@ the engine's own declaration does the rest.
 <summary><strong>What's in the box</strong></summary>
 
 ```
-Taskfile.yml            the whole surface (doctor/quickstart/setup/create-agent/info/train/build/match/upload/test)
+Taskfile.yml            the whole surface (doctor/quickstart/setup/envs/create-agent/info/train/build/match/upload/test)
 train/
   doctor.py             `task doctor` — prerequisites, each with its fix
   scaffold.py           `task create-agent` — agent projects from the engine's declaration
@@ -292,7 +298,7 @@ train/
   build.py              `task build` — python export / rust cargo / c wasi-sdk → bundle
   toolchain.py          `task setup LANGS=` — detect-first toolchain provisioning
   main.py               `task train` — train → export → parity-check → stage
-  core/discovery.py     release resolution through the platform API
+  core/discovery.py     `task envs` + release resolution, both through the platform API
   core/engine.py        the keyed engine cache (out/cache/<env>/<mode>/)
   core/policy.py        the trainable network, derived from the declared spaces
   core/train.py         a small real PPO loop (vectorized, SAME_STEP)
@@ -319,13 +325,13 @@ language:
 
 ```sh
 task setup LANGS=rust                                  # once
-task create-agent NAME=ferrous ENV=dance-off LANG=rust
+task create-agent NAME=ferrous ENV=<slug> LANG=rust
 task build AGENT=ferrous && task match AGENT=ferrous
 ```
 
 ```sh
 task setup LANGS=c                                     # once — finds /opt/wasi-sdk or $WASI_SDK, else downloads
-task create-agent NAME=clanger ENV=dance-off LANG=c
+task create-agent NAME=clanger ENV=<slug> LANG=c
 task build AGENT=clanger && task match AGENT=clanger
 ```
 

@@ -1,7 +1,9 @@
-"""The genericity gate: train/ names no environment, ever.
+"""The genericity gate: this template names no environment, ever.
 
-Environments are resolved from the CDN at runtime (train/core/discovery.py)
-and described by their own engines' declarations. The ONLY
+Environments are discovered from the platform at runtime
+(train/core/discovery.py — `task envs`) and described by their own engines'
+declarations; no slug is hardcoded anywhere in the repo, not as a default,
+not in CI, not in a docs example. The ONLY
 Lockstep package train/ may import is ``lockstep_train`` — the generic,
 environment-agnostic host. A direct import of anything else (or any
 environment slug appearing in the training core) would silently re-couple
@@ -13,7 +15,14 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-TRAIN_DIR = Path(__file__).resolve().parent.parent / "train"
+REPO_DIR = Path(__file__).resolve().parent.parent
+TRAIN_DIR = REPO_DIR / "train"
+
+#: Text files the slug lint scans, repo-wide.
+LINTED_SUFFIXES = {".py", ".yml", ".yaml", ".md", ".toml", ".txt"}
+#: Top-level directories that are not the template's own text: git
+#: internals, the venv, build output, and researchers' own agent scaffolds.
+LINT_SKIP_DIRS = {".git", ".venv", "out", "agents", "__pycache__"}
 
 #: The one legitimate Lockstep import: the generic wasm-stepping host.
 ALLOWED = {"lockstep_train"}
@@ -47,16 +56,32 @@ def test_train_imports_only_the_generic_host():
     )
 
 
-def test_train_names_no_environment():
-    """No environment slug appears in train/ source — not even in comments.
+#: Fragments of environment slugs that must never appear in the template.
+#: Assembled at runtime so this file does not itself name one.
+BANNED_FRAGMENTS = ("".join(("dan", "ce")),)
 
-    dance-off is allowed to appear in docs, examples and CI config; the
-    training core is where it must never appear.
+
+def _lintable_files():
+    for path in sorted(REPO_DIR.rglob("*")):
+        if not path.is_file() or path.suffix not in LINTED_SUFFIXES:
+            continue
+        rel = path.relative_to(REPO_DIR)
+        if any(part in LINT_SKIP_DIRS for part in rel.parts):
+            continue
+        yield path
+
+
+def test_no_environment_slug_anywhere():
+    """No environment slug is named anywhere in the template — not in train/,
+    not as a Taskfile default, not in CI, not in a docs example or a test
+    fixture. Environments come from the platform at runtime (`task envs`);
+    docs say `ENV=<slug>`, CI asks discovery for one, tests mock invented
+    slugs.
     """
     offenders = []
-    for path in sorted(TRAIN_DIR.rglob("*.py")):
-        text = path.read_text().lower()
-        for line_no, line in enumerate(text.splitlines(), 1):
-            if "dance" in line:
-                offenders.append(f"{path.name}:{line_no}")
-    assert not offenders, f"environment-specific references in train/: {offenders}"
+    for path in _lintable_files():
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            low = line.lower()
+            if any(fragment in low for fragment in BANNED_FRAGMENTS):
+                offenders.append(f"{path.relative_to(REPO_DIR)}:{line_no}")
+    assert not offenders, f"environment slug named in the template: {offenders}"
