@@ -10,7 +10,8 @@
 # agent's engine. There are no per-environment packages and no
 # per-environment config in this repo — the platform API names the release,
 # and the engine wasm's own declaration describes the whole interface.
-# dance-off is only the DEFAULT, as the shipped reference environment.
+# No environment is named here, not even as a default: `task envs` asks the
+# platform what is published, and ENV=<slug> is always yours to pass.
 # Browse the catalog: https://lockstep.it/arenas
 version: "3"
 
@@ -24,7 +25,6 @@ dotenv: [".env"]
 vars:
   VENV: "{{.ROOT_DIR}}/.venv"
   PY: "{{.VENV}}/bin/python"
-  ENV: '{{.ENV | default "dance-off"}}'
   LANGS: '{{.LANGS | default "python"}}'
 
 tasks:
@@ -53,7 +53,15 @@ tasks:
           esac
           echo "setup: $lang ready"
         done
-      - 'echo "next: task create-agent NAME=my-bot ENV={{.ENV}}  (add LANG=rust or LANG=c for the hand-written track)"'
+      - 'echo "next: task envs   (pick a slug)   then: task create-agent NAME=my-bot ENV=<slug>   (add LANG=rust or LANG=c for the hand-written track)"'
+
+  envs:
+    desc: "List the environments you can create an agent for, from the platform"
+    preconditions:
+      - sh: test -x "{{.PY}}"
+        msg: "no .venv yet — run: task setup"
+    cmds:
+      - '"{{.PY}}" -m train.core.discovery'
 
   create-agent:
     desc: "Scaffold agents/<NAME>/ from the engine's own declaration: generated interface file (regenerable) + a policy stub that is YOURS (never overwritten). NAME= ENV= MODE= LANG=python|rust|c FORCE=1 to re-scaffold under a changed identity."
@@ -62,6 +70,8 @@ tasks:
         msg: "no .venv yet — run: task setup"
       - sh: test -n "{{.NAME}}"
         msg: "pass NAME=<agent-name> (and ENV=<slug>)"
+      - sh: test -n "{{.ENV}}"
+        msg: "pass ENV=<slug> — task envs lists them"
     cmds:
       # LANG is also the POSIX locale variable, so a value that is not one
       # of ours and LOOKS like a locale (C.UTF-8, en_US.UTF-8, POSIX, C)
@@ -77,6 +87,9 @@ tasks:
 
   info:
     desc: "Print the environment's brief and wire layout in the terminal — goal, reward, what ends an episode, every value and slice with units, the budgets — from the engine you will train against. ENV= MODE= (the same page as the Interface tab)"
+    preconditions:
+      - sh: test -n "{{.ENV}}"
+        msg: "pass ENV=<slug> — task envs lists them"
     cmds:
       # Lazily fetches this env/mode's engine into the keyed cache
       # (out/cache/<env>/<mode>/ — no-op when current), then runs THAT
@@ -99,6 +112,9 @@ tasks:
     desc: "Zero decisions: setup → create-agent (python) → build → a real local match → hand you the archive to drop on lockstep.it/replay. ENV="
     vars:
       NAME: '{{.NAME | default "my-bot"}}'
+    preconditions:
+      - sh: test -n "{{.ENV}}"
+        msg: "pass ENV=<slug> — task envs lists them"
     cmds:
       - task: setup
       - task: create-agent

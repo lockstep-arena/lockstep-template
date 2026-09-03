@@ -171,9 +171,10 @@ downloading anything. The first `task info` also fetched the release into
 the keyed cache (`out/cache/go1-beacon/default/`) — nothing else will ever
 download it again until the release changes.
 
-Multi-mode environments take `MODE=` (dance-off publishes `servo-assist`
-and `raw-torque` — separate ladders, separate engines); the cache keys on
-(environment, mode), so nothing ever clobbers anything.
+Multi-mode environments take `MODE=` — separate ladders with separate
+engines; `task envs` lists each environment's modes and `task info
+ENV=<slug>` describes them. The cache keys on (environment, mode), so
+nothing ever clobbers anything.
 
 ## Part 1 — create an agent
 
@@ -375,21 +376,21 @@ links the component directly. Bytes in, bytes out.
 
 ## Two seats learning at once
 
-Dance-Off is a duel: two seats, one winner. Plain `task train` trains seat
-0 while seat 1 plays neutral. `PARALLEL=1` trains BOTH seats with one
-shared policy over the generic PettingZoo view — the classic first rung of
-self-play:
+On a duel environment — two seats, one winner (`task info ENV=<slug>`
+says how many seats a mode has) — plain `task train` trains seat 0 while
+seat 1 plays neutral. `PARALLEL=1` trains BOTH seats with one shared policy
+over the generic PettingZoo view — the classic first rung of self-play:
 
 ```sh
-task create-agent NAME=dancer ENV=dance-off
-task train AGENT=dancer PARALLEL=1 STEPS=128
+task create-agent NAME=duelist ENV=<slug>
+task train AGENT=duelist PARALLEL=1 STEPS=128
 ```
 
 ```
-── self-play training dance-off [servo-assist] for 128 seat-steps (both seats learning, one shared policy)
-→ onnx: agents/dancer/out/policy.onnx (1279116 bytes)
+── self-play training <slug> [<mode>] for 128 seat-steps (both seats learning, one shared policy)
+→ onnx: agents/duelist/out/policy.onnx (1279116 bytes)
 ✓ torch/onnxruntime parity: max abs diff 7.451e-08
-→ bundle: agents/dancer/out/bundle
+→ bundle: agents/duelist/out/bundle
 ```
 
 Every seat's transition lands in the same PPO buffer; the exported

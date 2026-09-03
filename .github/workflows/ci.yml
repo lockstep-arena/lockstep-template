@@ -1,10 +1,11 @@
 # Proves the whole pipeline on every OS researchers actually use.
 #
-# dance-off is CI's named test slug — the one place outside docs where an
-# environment may be named. The template itself resolves environments from
-# the CDN at runtime; CI just has to pick SOME release to build against.
-# (The engine-backed steps fetch from the live CDN, so they go green with
-# the first environments/ deploy.)
+# No environment is named here. CI asks the live platform what is published
+# (`python -m train.core.discovery --first`) and builds against the first
+# PUBLICLY published environment it answers with — the same discovery
+# `task envs` gives a researcher. The engine-backed steps then fetch that
+# release from the live CDN, so they go green with the first environments/
+# deploy and never need editing when the catalog changes.
 name: ci
 
 on:
@@ -42,6 +43,13 @@ jobs:
           pip install -r requirements.txt
           pip install "lockstep-train[pettingzoo]>=0.5.0" pytest
 
+      - name: Pick an environment from the live platform (first publicly published slug)
+        # $GITHUB_ENV works under bash on every matrix OS, Windows included.
+        run: |
+          ENV="$(python -m train.core.discovery --first)"
+          echo "ENV=$ENV" >> "$GITHUB_ENV"
+          echo "building against: $ENV"
+
       - name: Rust toolchain (the rust scaffold + the wire reference)
         run: rustup target add wasm32-wasip2
 
@@ -65,8 +73,8 @@ jobs:
       - name: Hermetic tests (scaffold generation, agent.toml, discovery vs a mock CDN, stage, export) + scaffold compile tests (rust + c → wasm components)
         run: python -m pytest tests -q
 
-      - name: create-agent from dance-off's live release (python)
-        run: python -m train.scaffold --name ci-bot --env dance-off
+      - name: create-agent from the discovered environment's live release (python)
+        run: python -m train.scaffold --name ci-bot --env "$ENV"
 
       - name: Build the hand-written (untrained) policy through export/stage
         run: python -m train.build --agent ci-bot
@@ -83,21 +91,22 @@ jobs:
 
       - name: create-agent + build in Rust (component from the same declaration)
         run: |
-          python -m train.scaffold --name ci-rust --env dance-off --lang rust
+          python -m train.scaffold --name ci-rust --env "$ENV" --lang rust
           python -m train.build --agent ci-rust
 
       - name: create-agent + build in C (wit-bindgen + wasi-sdk → component)
         run: |
-          python -m train.scaffold --name ci-c --env dance-off --lang c
+          python -m train.scaffold --name ci-c --env "$ENV" --lang c
           python -m train.build --agent ci-c
 
       - name: Every staged bundle is a valid v2 manifest for its mode
         run: |
           python - <<'PY'
+          import os
           import tomllib
           for name, kind in (("ci-bot", "onnx"), ("ci-rust", "component"), ("ci-c", "component")):
               m = tomllib.loads(open(f"agents/{name}/out/bundle/lockstep.toml", encoding="utf-8").read())
-              assert m["schema_version"] == 2 and m["environment"] == "dance-off", (name, m)
+              assert m["schema_version"] == 2 and m["environment"] == os.environ["ENV"], (name, m)
               has_policy = "artifacts" in m and "policy" in m.get("artifacts", {})
               assert has_policy == (kind == "onnx"), (name, m)
               print(f"bundle ok: {name} -> {m['environment']} [{m['mode']}] psv {m['payload_schema_version']}")
