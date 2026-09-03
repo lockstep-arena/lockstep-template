@@ -335,8 +335,11 @@ Your agent joins the arena pool and shows up on the environment's
 `task upload AGENT=walker AGENT_ID=<id>`.
 
 If you are here for a **hiring assessment**: this same upload is what you
-seal on your invite page — see the README's
-[assessment recipe](README.md#recipes).
+seal on your invite page, and by default it also sends the text files under
+`agents/<name>/` as an employer-visible source archive — see the README's
+[assessment recipe](README.md#recipes) for exactly what the employer
+receives (replays, metrics, notes, source, an interview guide) and the two
+options an invite may carry (hand-written-only, a follow-up round).
 
 ## The advanced track: Rust and C
 

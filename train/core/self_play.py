@@ -42,7 +42,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from .policy import Policy, obs_to_tensors
+from .policy import Policy, actions_to_env, obs_to_tensors
 from .train import METRICS_FIELDS, discounted_advantages, pick_device, save_checkpoint
 
 #: metrics.csv columns — the single-seat layout plus one self-play column.
@@ -193,10 +193,12 @@ def train_self_play(
             tensors = obs_to_tensors(_batch_seats(obs, agents), net)
             with torch.no_grad():
                 action, raw, log_prob, value = net.act(*tensors)
-            actions = action.numpy().astype(np.float32)
+            # Through the shell's own [-1, 1] → bounds map, per seat (see
+            # `actions_to_env`): training and the sealed bundle must agree.
+            actions = action.numpy()
 
             obs, rewards, terminations, truncations, _ = env.step(
-                {a: actions[i] for i, a in enumerate(agents)}
+                {a: actions_to_env(actions[i], env.action_space(a)) for i, a in enumerate(agents)}
             )
             reward = np.array([rewards[a] for a in agents], dtype=np.float32)
             done = np.array(
