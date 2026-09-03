@@ -244,6 +244,33 @@ def policy_from_signature(sig: dict) -> Policy:
     return Policy(spaces.Dict(obs), action)
 
 
+#: Beyond this magnitude a Box bound is the dtype range standing in for
+#: "open" (``lockstep_train`` clamps ±inf to the dtype's range so the space
+#: stays a valid Box); the shell passes an open bound through unscaled.
+_OPEN_BOUND = 1e30
+
+
+def actions_to_env(action: np.ndarray, action_space: spaces.Box) -> np.ndarray:
+    """The network's ``[-1, 1]`` output -> what the env actually steps on.
+
+    This is the SAME map the generic ONNX shell applies at match time
+    (``agent-onnx``'s ``denormalize``): clamp to ``[-1, 1]``, then affinely
+    onto each element's declared bounds; an open bound passes the value
+    through unscaled. Training MUST step the env through this map, or the
+    policy learns radians-in-``[-1, 1]`` (clamped by the engine) and the
+    exported bundle, which the shell rescales onto the full joint range,
+    plays a completely different action from the one that earned the
+    training return. That is exactly how a go1 policy scored 80 in
+    training and 0 on every sealed seed.
+    """
+    a = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
+    low = np.asarray(action_space.low, dtype=np.float32)
+    high = np.asarray(action_space.high, dtype=np.float32)
+    bounded = (np.abs(low) < _OPEN_BOUND) & (np.abs(high) < _OPEN_BOUND)
+    scaled = low + (a + 1.0) * 0.5 * (high - low)
+    return np.where(bounded, scaled, a).astype(np.float32)
+
+
 def obs_to_tensors(obs: dict, net: Policy) -> tuple[torch.Tensor, ...]:
     """Batched vector-env observation dict -> the network's input tuple.
 

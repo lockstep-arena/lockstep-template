@@ -36,7 +36,7 @@ from .core import utf8_output
 from .core.export import export, verify
 from .core.policy import policy_from_signature
 from .core.self_play import train_self_play
-from .core.stage import stage
+from .core.stage import provenance, stage
 from .core.train import default_num_envs, train
 
 OUT_DIR = Path("out")
@@ -214,7 +214,21 @@ def main() -> None:
     diff = verify(net, onnx)
     print(f"✓ torch/onnxruntime parity: max abs diff {diff:.3e}")
 
-    bundle = stage(env_slug, mode, payload_schema_version, onnx, shell, bundle_dir)
+    bundle = stage(
+        env_slug,
+        mode,
+        payload_schema_version,
+        onnx,
+        shell,
+        bundle_dir,
+        provenance_table=None
+        if args.from_weights
+        else provenance(
+            steps=args.steps,
+            num_envs=1 if args.parallel else (args.num_envs or default_num_envs()),
+            trained=True,
+        ),
+    )
     print(f"→ bundle: {bundle}")
     print("\nRun it:   task match\nCompete:  task upload")
 

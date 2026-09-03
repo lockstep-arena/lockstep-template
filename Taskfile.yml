@@ -193,7 +193,7 @@ tasks:
         echo "Watch it: drop out/archive.bin on https://lockstep.it/replay"
 
   upload:
-    desc: "Upload an agent's bundle to compete (or to seal for an assessment). Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision."
+    desc: "Upload an agent's bundle to compete (or to seal for an assessment), plus its source as an employer-visible archive. Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision. SOURCE=0 to upload the bundle alone."
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
@@ -209,11 +209,24 @@ tasks:
           exit 1
         fi
         DISPLAY_NAME="{{.NAME}}"; [ -n "$DISPLAY_NAME" ] || DISPLAY_NAME="$AGENT_NAME"
+        # The agent's SOURCE rides along as a separate, employer-visible
+        # archive (text files under agents/<name>/, minus out/ and build
+        # dirs) — what a hiring manager reads next to your replays. Only
+        # when the installed CLI knows the flag; an older CLI uploads the
+        # bundle alone and says so. SOURCE=0 opts out.
+        SOURCE_ARGS=""
+        if [ "{{.SOURCE}}" != "0" ]; then
+          if lockstep agent upload --help 2>/dev/null | grep -q -- '--source'; then
+            SOURCE_ARGS="--source $AGENT_DIR"
+          else
+            echo "upload: this lockstep CLI predates --source; uploading the bundle without the source archive (update: curl -fsSL https://dl.lockstep.it/install.sh | sh)" >&2
+          fi
+        fi
         if [ -n "{{.AGENT_ID}}" ]; then
-          lockstep agent upload --bundle "$BUNDLE" --agent-id "{{.AGENT_ID}}"
+          lockstep agent upload --bundle "$BUNDLE" --agent-id "{{.AGENT_ID}}" $SOURCE_ARGS
         else
           lockstep agent upload --bundle "$BUNDLE" \
-            --display-name "$DISPLAY_NAME" --environment-id "$AGENT_ENV"
+            --display-name "$DISPLAY_NAME" --environment-id "$AGENT_ENV" $SOURCE_ARGS
         fi
 
   test:

@@ -36,6 +36,7 @@ from pathlib import Path
 from .agents import AgentConfig, resolve_agent
 from .core import utf8_output
 from .core.engine import ensure_engine
+from .core.stage import provenance, provenance_toml, stage
 
 
 def manifest_text(cfg: AgentConfig, with_policy: bool) -> str:
@@ -51,6 +52,10 @@ def manifest_text(cfg: AgentConfig, with_policy: bool) -> str:
     )
     if with_policy:
         head += '\n[artifacts.policy]\nkind = "onnx"\npath = "artifacts/policy.onnx"\n'
+    # A hand-written policy (python export, rust, c): the template built it,
+    # nothing trained it — say so, so the employer's Technical details do not
+    # have to guess.
+    head += provenance_toml(provenance(trained=False))
     return head
 
 
@@ -68,7 +73,6 @@ def build_python(cfg: AgentConfig) -> Path:
     import torch  # noqa: F401 — fail here, with the venv hint, not deeper
 
     from .core.export import export, verify
-    from .core.stage import stage
     from .main import engine_identity
 
     paths = ensure_engine(cfg.env, cfg.mode)
@@ -107,7 +111,15 @@ def build_python(cfg: AgentConfig) -> Path:
     print(f"→ onnx: {onnx} ({onnx.stat().st_size} bytes)", file=sys.stderr)
     diff = verify(net, onnx)
     print(f"✓ torch/onnxruntime parity: max abs diff {diff:.3e}", file=sys.stderr)
-    return stage(cfg.env, mode, payload_schema_version, onnx, paths.shell, cfg.bundle_dir)
+    return stage(
+        cfg.env,
+        mode,
+        payload_schema_version,
+        onnx,
+        paths.shell,
+        cfg.bundle_dir,
+        provenance_table=provenance(trained=False),
+    )
 
 
 def build_rust(cfg: AgentConfig) -> Path:

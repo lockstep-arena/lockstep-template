@@ -42,7 +42,7 @@ import numpy as np
 import torch
 from gymnasium.vector import AsyncVectorEnv, AutoresetMode, SyncVectorEnv
 
-from .policy import Policy, obs_to_tensors
+from .policy import Policy, actions_to_env, obs_to_tensors
 
 #: metrics.csv column order (one row per rollout).
 METRICS_FIELDS = [
@@ -322,8 +322,11 @@ def train(
             with torch.no_grad():
                 action, raw, log_prob, value = net.act(*tensors)
 
+            # The env's Box is the DECLARED bounds; the network speaks
+            # [-1, 1]. Step through the shell's own map so training and the
+            # sealed bundle play the same action (see `actions_to_env`).
             obs, reward, terminated, truncated, _ = env.step(
-                action.numpy().astype(np.float32)
+                actions_to_env(action.numpy(), env.single_action_space)
             )
             done = np.logical_or(terminated, truncated)
 

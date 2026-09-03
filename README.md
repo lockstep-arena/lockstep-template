@@ -262,10 +262,37 @@ lockstep agent validate --bundle agents/my-bot/out/bundle
 
 Some companies use Lockstep environments as hands-on hiring assessments. If
 you received an invite link, the flow is this exact repo: practice locally
-(`task build` / `task train` / `task match`), `task upload` your best agent,
-then **seal** it from your invite page. The invite page lists your verified
-agents — the upload you just made is what you seal. Practice runs and the
-final evaluation both run the same engine you built against here.
+as much as you like (`task build` / `task train` / `task match` on random
+scenarios, on the same engine that scores you), `task upload` your best
+agent, then **seal** it from your invite page. The invite page lists your
+verified agents — the upload you just made is what you seal. Sealing is
+final: the platform runs your bundle once over the role's frozen scenario
+suite and the score is what it is.
+
+What the employer receives, so there are no surprises:
+
+- **The score and every replay**, scenario by scenario, next to two
+  reference points: our scripted reference controller and this template's
+  stock trainer run on the same scenarios.
+- **The per-run metrics** (energy, smoothness, drops, time to reach, failure
+  reason) and your **approach notes** from the invite page.
+- **Your source**, if you let `task upload` send it (the default — it ships
+  the text files under `agents/<name>/`, skipping `out/` and build
+  directories; `SOURCE=0` uploads the bundle alone). The employer reads it
+  next to your replays; it never reaches other candidates or the match server.
+- **An interview guide** written by the environment's authors, keyed to the
+  failure modes and metrics on your report. Expect to be asked about your
+  weakest scenario.
+
+Two invite options an employer may have switched on: **hand-written policy
+only** (no ONNX artifact — `task create-agent LANG=rust` or `LANG=c`; the
+Python path always ships an ONNX policy and will be refused at seal), and a
+**follow-up round** — a second, 48-hour invite on fresh scenarios with one
+stated change, which you take with the same workflow.
+
+AI-assisted work is permitted. Describe what you generated and what you
+fixed in your approach notes: the interviewer will ask, and the source and
+the replays make the answer checkable.
 
 </details>
 
