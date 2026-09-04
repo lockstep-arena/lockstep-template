@@ -6,7 +6,7 @@ The release lives under an UNGUESSABLE directory on the CDN
 (``environments/<slug>/releases/<version>-<token>/<mode>/``), so its path
 is never derived here — it comes from the platform API's ``environment/get``
 (the pinned ``engine_object_key``), which ``lockstep_train.fetch.resolve``
-wraps. Competitions answer publicly; an assessment-only environment answers
+wraps. Exhibitions answer publicly; an assessment-only environment answers
 an invited candidate through ``LOCKSTEP_API_KEY`` (the key ``task upload``
 already needs). Under that prefix:
 

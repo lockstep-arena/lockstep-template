@@ -43,7 +43,7 @@ into a keyed cache (`out/cache/<env>/<mode>/`) the first time something
 needs one.
 
 Browse the catalog at
-[lockstep.it/competitions](https://lockstep.it/competitions); each
+[lockstep.it/exhibitions](https://lockstep.it/exhibitions); each
 environment's **Interface** tab is `task info` rendered as a page, and its
 **Practice** tab is this README, per environment.
 
@@ -146,7 +146,7 @@ obs, info = env.reset(seed=0)
   feature engineering reads `obs["body"][iface.OBS_BODY_JOINT_VEL]`, not
   `obs["body"][7:19]`.
 - The per-tick `reward` and `done` come from the engine too: training and
-  competition are literally the same computation.
+  a live match are literally the same computation.
 - `gymnasium.make_vec(..., num_envs=8)` gets you the native vector env
   (N engines on Rust threads, GIL released, SAME_STEP autoreset).
 - Multi-seat environments: `lockstep_train.env.LockstepParallelEnv` is the

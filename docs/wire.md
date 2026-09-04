@@ -37,7 +37,7 @@ positional. Consequences worth stating plainly:
 - A training host, an ONNX shell or a hand-written agent reads the
   declaration and knows the whole interface — no codegen, no per-environment
   package. The per-tick `reward` is computed by the engine, so training and
-  competition are literally the same computation.
+  a live match are literally the same computation.
 - A person reads the same declaration and knows what every element *means*:
   the engine is the single source of an environment's documentation, and
   every surface that explains one (the Interface page, `lockstep_train.info`
@@ -192,7 +192,7 @@ fixed by the declaration:
   declaration has per-element bounds); an element with an open bound passes
   through unscaled. This is what a tanh-headed policy trained with
   `lockstep-train` — whose action space is the same normalized box — needs:
-  training and competition are the same computation. A graph that emits
+  training and a live match are the same computation. A graph that emits
   raw joint angles instead of `[-1, 1]` is silently clamped to the ends of
   every range.
 
