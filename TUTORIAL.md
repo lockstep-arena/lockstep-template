@@ -165,7 +165,7 @@ BUDGETS
 That is the whole contract: 54 floats in, 12 joint targets out, and the
 reward you will train on spelled out by the engine that computes it. The
 same declaration renders as the environment's
-[Interface tab](https://lockstep.it/competitions/environment/go1-beacon/interface);
+[Interface tab](https://lockstep.it/exhibitions/environment/go1-beacon/interface);
 `python -m lockstep_train.info --env go1-beacon` prints it without
 downloading anything. The first `task info` also fetched the release into
 the keyed cache (`out/cache/go1-beacon/default/`) — nothing else will ever

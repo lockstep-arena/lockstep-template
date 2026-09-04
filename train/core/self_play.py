@@ -11,7 +11,7 @@ opponent is never frozen — it is the same policy, one update behind
 nothing. This is the first rung of self-play (the standard one); league or
 population play is deliberately out of scope here.
 
-Why one policy and not one per seat: competition is one agent per seat
+Why one policy and not one per seat: an exhibition match is one agent per seat
 answering ``on_tick`` from its own view, and the seats are symmetric (same
 observation layout, same action space — checked below). A single policy is
 exactly what gets exported, so the artifact
