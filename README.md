@@ -381,11 +381,13 @@ archive your match writes (`out/archive.bin`) drops straight onto
 
 Every engine describes itself at seat-init: named observations and actions
 with dtype, shape, bounds (per-element where it matters), documented
-slices with units, free-form metadata, and the seat's brief — goal,
-reward, what ends an episode. Every tick after that is positional,
-near-raw blobs the declaration explains. Little-endian, no codegen — the
-spec fits on a page ([docs/wire.md](docs/wire.md) — vendored here from the
-platform's interface repo at every release), and `reference/rust-wire` +
+slices with units (or documented columns, for a table-shaped value),
+free-form metadata, the seat's brief — goal, reward, what ends an episode
+— and the metrics the session will report, each with a unit and a
+direction. Every tick after that is positional, near-raw blobs the
+declaration explains. Little-endian, no codegen — the spec fits on a page
+([docs/wire.md](docs/wire.md) — vendored here from the platform's
+interface repo at every release), and `reference/rust-wire` +
 `reference/c-wire` re-implement it from scratch to prove the point. The
 generic ONNX shell, the Python env, `task info`, the environment's
 Interface page, your generated interface files and your hand-written agent

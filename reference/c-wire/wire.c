@@ -95,65 +95,113 @@ static void spec_free(wire_value_spec_t *t) {
         free(t->slices[i].unit);
     }
     free(t->slices);
+    for (uint32_t i = 0; i < t->n_columns; i++) {
+        free(t->columns[i].name);
+        free(t->columns[i].doc);
+        free(t->columns[i].unit);
+    }
+    free(t->columns);
     memset(t, 0, sizeof(*t));
 }
 
-static int spec_parse(reader_t *r, wire_value_spec_t *t) {
-    memset(t, 0, sizeof(*t));
+/* The fields of one value spec, read out of its region. The region reader
+ * `r` spans exactly the region, so every bounds check below is against the
+ * region, never the whole message. */
+static int spec_parse_fields(reader_t *r, wire_value_spec_t *t) {
     uint8_t dtype_byte, rank, has_elem_bounds;
     if (!read_str(r, &t->name) || !read_str(r, &t->doc) || !read_u8(r, &dtype_byte) ||
         dtype_byte > 2 || !read_u8(r, &rank))
-        goto fail;
+        return 0;
     t->dtype = (wire_dtype_t)dtype_byte;
     t->rank = rank;
     t->shape = malloc(sizeof(uint32_t) * (rank ? rank : 1));
     if (!t->shape)
-        goto fail;
+        return 0;
     t->numel = 1;
     for (uint8_t i = 0; i < rank; i++) {
         if (!read_u32(r, &t->shape[i]))
-            goto fail;
+            return 0;
         t->numel *= t->shape[i];
     }
     if (t->numel == 0)
         t->numel = 1;
     if (!read_f32(r, &t->low) || !read_f32(r, &t->high) || !read_u8(r, &has_elem_bounds))
-        goto fail;
+        return 0;
     if (has_elem_bounds) {
         /* Bounds-check before allocating: a hostile numel must not OOM. */
         if (t->numel * 8 > r->len - r->pos)
-            goto fail;
+            return 0;
         t->elem_low = malloc(sizeof(float) * t->numel);
         t->elem_high = malloc(sizeof(float) * t->numel);
         if (!t->elem_low || !t->elem_high)
-            goto fail;
+            return 0;
         for (size_t i = 0; i < t->numel; i++)
             if (!read_f32(r, &t->elem_low[i]))
-                goto fail;
+                return 0;
         for (size_t i = 0; i < t->numel; i++)
             if (!read_f32(r, &t->elem_high[i]))
-                goto fail;
+                return 0;
     }
-    if (!read_u32(r, &t->n_slices))
-        goto fail;
-    if (t->n_slices) {
+    uint32_t n_slices;
+    if (!read_u32(r, &n_slices))
+        return 0;
+    if (n_slices) {
         /* Each slice is at least 14 bytes on the wire. */
-        if ((size_t)t->n_slices * 14 > r->len - r->pos)
-            goto fail;
-        t->slices = calloc(t->n_slices, sizeof(wire_slice_t));
+        if ((size_t)n_slices * 14 > r->len - r->pos)
+            return 0;
+        t->slices = calloc(n_slices, sizeof(wire_slice_t));
         if (!t->slices)
-            goto fail;
-        for (uint32_t i = 0; i < t->n_slices; i++) {
+            return 0;
+        t->n_slices = n_slices;
+        for (uint32_t i = 0; i < n_slices; i++) {
             wire_slice_t *s = &t->slices[i];
             if (!read_str(r, &s->name) || !read_str(r, &s->doc) || !read_str(r, &s->unit) ||
                 !read_u32(r, &s->start) || !read_u32(r, &s->len))
-                goto fail;
+                return 0;
         }
     }
+    uint32_t n_columns;
+    if (!read_u32(r, &n_columns))
+        return 0;
+    if (n_columns) {
+        /* Each column is at least 6 bytes on the wire. */
+        if ((size_t)n_columns * 6 > r->len - r->pos)
+            return 0;
+        t->columns = calloc(n_columns, sizeof(wire_column_t));
+        if (!t->columns)
+            return 0;
+        t->n_columns = n_columns;
+        for (uint32_t i = 0; i < n_columns; i++) {
+            wire_column_t *c = &t->columns[i];
+            if (!read_str(r, &c->name) || !read_str(r, &c->doc) || !read_str(r, &c->unit))
+                return 0;
+        }
+        /* Columns are exactly one per element of the last axis, or none —
+         * and only a rank >= 2 value has them. */
+        uint32_t expected = rank >= 2 ? t->shape[rank - 1] : 0;
+        if (n_columns != expected)
+            return 0;
+    }
+    /* Anything left in the region belongs to a later revision: skipped. */
     return 1;
-fail:
-    spec_free(t);
-    return 0;
+}
+
+/* One length-prefixed region: len u32, then the fields. The region is
+ * taken whole, the known fields are read out of it, and whatever it holds
+ * after them is skipped. A region that ends before the known fields (or a
+ * len that runs past the input) is an error. */
+static int spec_parse(reader_t *outer, wire_value_spec_t *t) {
+    memset(t, 0, sizeof(*t));
+    uint32_t len;
+    const uint8_t *region;
+    if (!read_u32(outer, &len) || !take(outer, len, &region))
+        return 0;
+    reader_t r = {region, len, 0};
+    if (!spec_parse_fields(&r, t)) {
+        spec_free(t);
+        return 0;
+    }
+    return 1;
 }
 
 void wire_bounds_at(const wire_value_spec_t *spec, size_t i, float *low, float *high) {
@@ -181,12 +229,26 @@ const wire_slice_t *wire_find_slice(const wire_value_spec_t *spec, const char *n
     return NULL;
 }
 
+const wire_column_t *wire_find_column(const wire_value_spec_t *spec, const char *name) {
+    for (uint32_t i = 0; i < spec->n_columns; i++)
+        if (strcmp(spec->columns[i].name, name) == 0)
+            return &spec->columns[i];
+    return NULL;
+}
+
+long wire_column_index(const wire_value_spec_t *spec, const char *name) {
+    for (uint32_t i = 0; i < spec->n_columns; i++)
+        if (strcmp(spec->columns[i].name, name) == 0)
+            return (long)i;
+    return -1;
+}
+
 static int specs_parse(reader_t *r, wire_value_spec_t **out, uint32_t *n_out) {
     uint32_t n;
     if (!read_u32(r, &n))
         return 0;
-    /* Each spec is at least 21 bytes on the wire. */
-    if ((size_t)n * 21 > r->len - r->pos)
+    /* Each spec is at least 4 (len) + 25 bytes on the wire. */
+    if ((size_t)n * 29 > r->len - r->pos)
         return 0;
     wire_value_spec_t *specs = n ? calloc(n, sizeof(wire_value_spec_t)) : NULL;
     if (n && !specs)
@@ -201,6 +263,18 @@ static int specs_parse(reader_t *r, wire_value_spec_t **out, uint32_t *n_out) {
     }
     *out = specs;
     *n_out = n;
+    return 1;
+}
+
+static int metric_parse(reader_t *r, wire_metric_spec_t *m) {
+    uint8_t kind, direction, headline;
+    if (!read_str(r, &m->key) || !read_str(r, &m->doc) || !read_str(r, &m->unit) ||
+        !read_u8(r, &kind) || kind > 6 || !read_u8(r, &direction) || direction > 2 ||
+        !read_f32(r, &m->low) || !read_f32(r, &m->high) || !read_u8(r, &headline))
+        return 0;
+    m->kind = (wire_metric_kind_t)kind;
+    m->direction = (wire_metric_direction_t)direction;
+    m->headline = headline != 0;
     return 1;
 }
 
@@ -230,8 +304,28 @@ wire_status_t wire_seat_init_decode(const uint8_t *bytes, size_t len, wire_seat_
     if (!read_str(&r, &out->brief.goal) || !read_str(&r, &out->brief.reward) ||
         !read_str(&r, &out->brief.ends))
         goto fail;
-    /* Unknown trailing bytes are IGNORED (spec rule): the declaration is
-     * tail-extensible. Views and inputs stay strict. */
+    /* The tail. Nothing after `ends` = a declaration written before the
+     * metrics section existed: zero metrics. A tail that starts is read
+     * whole — a count with too few specs behind it is an error. Bytes after
+     * the sections this reader knows are IGNORED (spec rule): a later
+     * revision may append sections. Views and inputs stay strict. */
+    if (r.pos < r.len) {
+        uint32_t n_metrics;
+        if (!read_u32(&r, &n_metrics))
+            goto fail;
+        if (n_metrics) {
+            /* Each metric is at least 17 bytes on the wire. */
+            if ((size_t)n_metrics * 17 > r.len - r.pos)
+                goto fail;
+            out->metrics = calloc(n_metrics, sizeof(wire_metric_spec_t));
+            if (!out->metrics)
+                goto fail;
+            out->n_metrics = n_metrics;
+            for (uint32_t i = 0; i < n_metrics; i++)
+                if (!metric_parse(&r, &out->metrics[i]))
+                    goto fail;
+        }
+    }
     return WIRE_OK;
 fail:
     wire_seat_init_free(out);
@@ -253,6 +347,12 @@ void wire_seat_init_free(wire_seat_init_t *init) {
     free(init->brief.goal);
     free(init->brief.reward);
     free(init->brief.ends);
+    for (uint32_t i = 0; i < init->n_metrics; i++) {
+        free(init->metrics[i].key);
+        free(init->metrics[i].doc);
+        free(init->metrics[i].unit);
+    }
+    free(init->metrics);
     memset(init, 0, sizeof(*init));
 }
 
@@ -263,10 +363,24 @@ const char *wire_meta_get(const wire_seat_init_t *init, const char *key) {
     return NULL;
 }
 
+const wire_value_spec_t *wire_find_obs(const wire_seat_init_t *init, const char *name) {
+    for (uint32_t i = 0; i < init->n_obs; i++)
+        if (strcmp(init->obs[i].name, name) == 0)
+            return &init->obs[i];
+    return NULL;
+}
+
 const wire_value_spec_t *wire_find_action(const wire_seat_init_t *init, const char *name) {
     for (uint32_t i = 0; i < init->n_actions; i++)
         if (strcmp(init->actions[i].name, name) == 0)
             return &init->actions[i];
+    return NULL;
+}
+
+const wire_metric_spec_t *wire_find_metric(const wire_seat_init_t *init, const char *key) {
+    for (uint32_t i = 0; i < init->n_metrics; i++)
+        if (strcmp(init->metrics[i].key, key) == 0)
+            return &init->metrics[i];
     return NULL;
 }
 

@@ -1,0 +1,170 @@
+{
+  "actions": [
+    {
+      "doc": "joint torques, clamped by the world",
+      "dtype": "f32",
+      "high": 1.0,
+      "low": -1.0,
+      "name": "action",
+      "shape": [
+        3
+      ],
+      "slices": [
+        {
+          "doc": "",
+          "len": 3,
+          "name": "torque",
+          "start": 0,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "doc": "",
+      "dtype": "i32",
+      "high": 3.0,
+      "low": 0.0,
+      "name": "mode",
+      "shape": [
+        1
+      ]
+    }
+  ],
+  "brief": {
+    "ends": "After 5 ticks, or the moment the body falls.",
+    "goal": "Hold the pose the cue asks for.",
+    "reward": "+1 per tick within tolerance, −0.1 per tick otherwise."
+  },
+  "meta": [
+    [
+      "control_hz",
+      "50"
+    ],
+    [
+      "task",
+      "golden"
+    ]
+  ],
+  "metrics": [
+    {
+      "direction": "higher",
+      "doc": "0–100 as in the brief",
+      "headline": true,
+      "high": 100.0,
+      "key": "score",
+      "kind": "score",
+      "low": 0.0,
+      "unit": ""
+    },
+    {
+      "direction": "lower",
+      "doc": "cues missed over cues",
+      "high": null,
+      "key": "misses",
+      "kind": "rate",
+      "low": null,
+      "unit": "%"
+    },
+    {
+      "direction": "neutral",
+      "doc": "the routine's tempo",
+      "high": 180.0,
+      "key": "scenario-tempo",
+      "kind": "scenario",
+      "low": 60.0,
+      "unit": "bpm"
+    }
+  ],
+  "obs": [
+    {
+      "doc": "a 2×4 grayscale strip, one channel, top row first",
+      "dtype": "u8",
+      "high": 255.0,
+      "low": 0.0,
+      "name": "marquee",
+      "shape": [
+        1,
+        2,
+        4
+      ]
+    },
+    {
+      "doc": "the body state",
+      "dtype": "f32",
+      "elem_bounds": {
+        "high": [
+          2.5,
+          2.5,
+          10.0,
+          10.0,
+          1.0
+        ],
+        "low": [
+          -2.5,
+          -2.5,
+          -10.0,
+          -10.0,
+          0.0
+        ]
+      },
+      "high": 1.0,
+      "low": -1.0,
+      "name": "agent",
+      "shape": [
+        5
+      ],
+      "slices": [
+        {
+          "doc": "joint angles",
+          "len": 2,
+          "name": "joint_pos",
+          "start": 0,
+          "unit": "rad"
+        },
+        {
+          "doc": "joint angular velocities",
+          "len": 2,
+          "name": "joint_vel",
+          "start": 2,
+          "unit": "rad/s"
+        },
+        {
+          "doc": "fraction of the episode remaining, 1 → 0",
+          "len": 1,
+          "name": "time_left",
+          "start": 4,
+          "unit": ""
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "doc": "0 hold, 1 step, 2 turn",
+          "name": "move",
+          "unit": "code"
+        },
+        {
+          "doc": "ticks until the cue lands",
+          "name": "ticks_to_hit",
+          "unit": "ticks"
+        },
+        {
+          "doc": "1 for a real cue, 0 past the end",
+          "name": "valid",
+          "unit": "flag"
+        }
+      ],
+      "doc": "the next 2 cues as rows, nearest first",
+      "dtype": "f32",
+      "high": null,
+      "low": -1.0,
+      "name": "cues",
+      "shape": [
+        2,
+        3
+      ]
+    }
+  ],
+  "seat": 1
+}
