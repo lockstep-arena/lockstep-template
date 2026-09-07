@@ -131,7 +131,7 @@ def fetch_release(release: EnvRelease, out_dir: Path) -> dict[str, Path]:
     artifacts into ``out_dir``; ``{relative name: path}``.
 
     Progress goes to stderr so callers can capture stdout cleanly."""
-    from lockstep_train.fetch import ARTIFACTS_DIR, DATA_DIR, _fetch_pinned
+    from lockstep_train.fetch import ARTIFACTS_DIR, DATA_DIR, fetch_pinned
 
     written = {}
     for name, url in (
@@ -155,7 +155,7 @@ def fetch_release(release: EnvRelease, out_dir: Path) -> dict[str, Path]:
         path = out_dir / sub / file_name
         url = release.blob_url(entry)
         try:
-            fetched = _fetch_pinned(url, path, entry.sha256, entry.bytes)
+            fetched = fetch_pinned(url, path, entry.sha256, entry.bytes)
         except RuntimeError as e:
             raise SystemExit(str(e)) from e
         if fetched:
