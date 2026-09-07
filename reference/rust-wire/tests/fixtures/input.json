@@ -1,0 +1,20 @@
+{
+  "values": [
+    {
+      "dtype": "f32",
+      "name": "action",
+      "values": [
+        0.25,
+        -0.75,
+        1.0
+      ]
+    },
+    {
+      "dtype": "i32",
+      "name": "mode",
+      "values": [
+        2
+      ]
+    }
+  ]
+}

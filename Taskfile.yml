@@ -12,7 +12,7 @@
 # and the engine wasm's own declaration describes the whole interface.
 # No environment is named here, not even as a default: `task envs` asks the
 # platform what is published, and ENV=<slug> is always yours to pass.
-# Browse the catalog: https://lockstep.it/arenas
+# Browse the catalog: https://lockstep.it/exhibitions
 version: "3"
 
 # Print what the task SAYS, not the shell line that says it. This is a
@@ -42,7 +42,7 @@ tasks:
               # The one Lockstep dependency. LOCKSTEP_TRAIN_SPEC overrides the
               # PyPI spec for local development against a checkout/wheel — e.g.
               #   task setup LOCKSTEP_TRAIN_SPEC="-e ../LOCKSTEP-PLATFORM/packages/mixed/lockstep-train[pettingzoo]"
-              "{{.VENV}}/bin/pip" install {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train[pettingzoo]>=0.5.0\""}}
+              "{{.VENV}}/bin/pip" install {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train[pettingzoo]>=0.6.0\""}}
               ;;
             rust|c)
               python3 -m train.toolchain install "$lang"
@@ -56,7 +56,7 @@ tasks:
       - 'echo "next: task envs   (pick a slug)   then: task create-agent NAME=my-bot ENV=<slug>   (add LANG=rust or LANG=c for the hand-written track)"'
 
   envs:
-    desc: "List the environments you can create an agent for, from the platform"
+    desc: "List the environments you can create an agent for, from the platform — each mode with its assessment tags"
     preconditions:
       - sh: test -x "{{.PY}}"
         msg: "no .venv yet — run: task setup"
@@ -64,7 +64,7 @@ tasks:
       - '"{{.PY}}" -m train.core.discovery'
 
   create-agent:
-    desc: "Scaffold agents/<NAME>/ from the engine's own declaration: generated interface file (regenerable) + a policy stub that is YOURS (never overwritten). NAME= ENV= MODE= LANG=python|rust|c FORCE=1 to re-scaffold under a changed identity."
+    desc: "Scaffold agents/<NAME>/ from the engine's own declaration: a generated interface file (regenerable — every value, slice and column as a named constant with its doc and unit, plus typed accessors and an action builder) + a policy stub and, for python, the network (model.py) that are YOURS (never overwritten). NAME= ENV= MODE= LANG=python|rust|c FORCE=1 to re-scaffold under a changed identity."
     preconditions:
       - sh: test -x "{{.PY}}"
         msg: "no .venv yet — run: task setup"
@@ -86,15 +86,16 @@ tasks:
         "{{.PY}}" -m train.scaffold --name "{{.NAME}}" --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} $LANG_ARG {{if .FORCE}}--force{{end}}
 
   info:
-    desc: "Print the environment's brief and wire layout in the terminal — goal, reward, what ends an episode, every value and slice with units, the budgets — from the engine you will train against. ENV= MODE= (the same page as the Interface tab)"
+    desc: "Print the environment's brief and wire layout in the terminal — goal, reward, what ends an episode, how you are scored, every value with its slices or columns and units, the tags, the budgets — from the engine you will train against. ENV= MODE= (the same page as the Interface tab)"
     preconditions:
       - sh: test -n "{{.ENV}}"
         msg: "pass ENV=<slug> — task envs lists them"
     cmds:
-      # Lazily fetches this env/mode's engine into the keyed cache
-      # (out/cache/<env>/<mode>/ — no-op when current), then runs THAT
-      # engine for one reset and prints what it declares, so what you read
-      # is exactly what `task train` builds against. `--env` (the
+      # Lazily fetches this env/mode's release into the keyed cache
+      # (out/cache/<env>/<mode>/ — the engine, the shell and any data blobs
+      # or ONNX artifacts the engine reads; no-op when current), then runs
+      # THAT engine for one reset and prints what it declares, so what you
+      # read is exactly what `task train` builds against. `--env` (the
       # platform's record) is the no-download alternative:
       # python -m lockstep_train.info --env <slug>.
       - |
@@ -102,7 +103,7 @@ tasks:
         "{{.PY}}" -m lockstep_train.info --engine "$ENGINE"
 
   doctor:
-    desc: "Check this machine for everything the template needs — Python, Task, the lockstep CLI, the venv, per-language toolchains for the agents you actually have — and say exactly what is missing and how to fix it."
+    desc: "Check this machine for everything the template needs — Python, Task, the lockstep CLI, the venv, per-language toolchains for the agents you actually have, what the engine cache holds — and say exactly what is missing and how to fix it."
     cmds:
       # Deliberately runs on the SYSTEM python: the venv is one of the
       # things it checks, so it cannot depend on it.
@@ -131,9 +132,10 @@ tasks:
       - 'echo "Train it:      task train AGENT={{.NAME}}  then task match, then task upload"'
 
   train:
-    desc: "PPO → ONNX → parity check → stage agents/<AGENT>/out/bundle. AGENT= (defaults to the sole agent; python agents only) STEPS=8192 NUM_ENVS=(cores-2, max 8) RESUME=1 to continue a crashed run. PARALLEL=1 trains BOTH seats at once (one shared policy over the generic PettingZoo env) on multi-seat environments"
+    desc: "Train → ONNX → parity check → stage agents/<AGENT>/out/bundle. AGENT= (defaults to the sole agent; python agents only). RECIPE=ppo (default): STEPS=8192 NUM_ENVS=(cores-2, max 8) RESUME=1 to continue a crashed run, PARALLEL=1 trains BOTH seats at once on multi-seat environments. RECIPE=supervised: fit the truth the environment reveals (its feedback window or lagged reward, per agent.toml's [supervised]) — SEEDS=16 EPOCHS=20. The network is the agent's own model.py either way."
     vars:
       STEPS: '{{.STEPS | default "8192"}}'
+      RECIPE: '{{.RECIPE | default "ppo"}}'
     preconditions:
       - sh: test -x "{{.PY}}"
         msg: "no .venv yet — run: task setup"
@@ -141,7 +143,10 @@ tasks:
       # env/mode/engine all come from the agent's own agent.toml via the
       # keyed cache — a mode mismatch is impossible.
       - >-
-        "{{.PY}}" -m train.main {{if .AGENT}}--agent "{{.AGENT}}"{{end}} --steps {{.STEPS}}
+        "{{.PY}}" -m train.main {{if .AGENT}}--agent "{{.AGENT}}"{{end}}
+        --recipe {{.RECIPE}} --steps {{.STEPS}}
+        {{if .SEEDS}}--seeds {{.SEEDS}}{{end}}
+        {{if .EPOCHS}}--epochs {{.EPOCHS}}{{end}}
         {{if .NUM_ENVS}}--num-envs {{.NUM_ENVS}}{{end}}
         {{if .RESUME}}--resume{{end}}
         {{if .PARALLEL}}--parallel{{end}}

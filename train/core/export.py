@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from .policy import OUTPUT_ACTION, Policy
+from .policy import OUTPUT_ACTION, Policy, graph_dtype
 
 #: Largest tolerated difference between torch and onnxruntime, per element.
 #:
@@ -35,20 +35,22 @@ def sample_inputs(net: Policy, batch: int = 1) -> tuple[torch.Tensor, ...]:
     """Representative inputs for tracing and for the parity check.
 
     Random rather than zeros on purpose: a zero observation would sail through
-    a graph that had lost a bias or a nonlinearity. Image streams get values
-    in [0, 1] (the normalized range the graph input carries), vectors get
-    standard normals.
+    a graph that had lost a bias or a nonlinearity. Keyed on the DECLARED
+    dtype, never on shape: ``u8`` inputs get values in [0, 1] (the ÷ 255
+    range the graph input carries), ``i32`` inputs small integers, ``f32``
+    inputs standard normals.
     """
     generator = torch.Generator().manual_seed(0)
     dtypes = getattr(net, "input_dtypes", {})
     tensors = []
     for name in net.input_names:
         shape = (batch, *net.input_shapes[name])
-        if dtypes.get(name) == "int32":
+        declared = dtypes.get(name, "float32")
+        if declared == "int32":
             tensors.append(
                 torch.randint(0, 4, shape, generator=generator, dtype=torch.int32)
             )
-        elif len(shape) == 4:
+        elif declared == "uint8":
             tensors.append(torch.rand(*shape, generator=generator))
         else:
             tensors.append(torch.randn(*shape, generator=generator))
@@ -126,6 +128,26 @@ def verify(net: Policy, path: str | Path, atol: float = PARITY_ATOL) -> float:
             f"exported input names {sorted(got_names)} != {sorted(want_names)}; "
             "the host binds tensors by NAME, so a rename silently breaks every shell"
         )
+    # The declared signature, exactly: shape [1, *declared] and the dtype
+    # the shell feeds (f32 for f32 and u8 ÷ 255, int32 for i32). A stream
+    # that reshaped or re-typed its input would still trace and still run
+    # here; only this check says it no longer matches the wire.
+    dtypes = getattr(net, "input_dtypes", {})
+    ort_types = {"float32": "tensor(float)", "int32": "tensor(int32)"}
+    for inp in session.get_inputs():
+        want_shape = [1, *net.input_shapes[inp.name]]
+        if list(inp.shape) != want_shape:
+            raise AssertionError(
+                f"exported input {inp.name!r} has shape {list(inp.shape)}, the "
+                f"declaration says {want_shape}; the shell feeds the declared "
+                "shape verbatim and refuses anything else"
+            )
+        want_type = ort_types[graph_dtype(dtypes.get(inp.name, "float32"))]
+        if inp.type != want_type:
+            raise AssertionError(
+                f"exported input {inp.name!r} is {inp.type}, the shell feeds "
+                f"{want_type} for this declared dtype"
+            )
     out_names = [o.name for o in session.get_outputs()]
     if OUTPUT_ACTION not in out_names:
         raise AssertionError(

@@ -4,9 +4,10 @@ Build an agent for any [Lockstep](https://lockstep.it) environment, watch it
 play a real local match, and upload it to compete — from nothing but this
 repo. The engine you build against is the *same WASM binary* that runs
 ranked matches, and it **documents itself**: goal, reward, what ends an
-episode, every observation and slice with units. `task create-agent` turns
-that self-description into a ready-to-edit agent project — every field
-named, every bound stated, in Python, Rust or C. Nothing here is
+episode, how you are scored, every observation with its slices or columns
+and their units. `task create-agent` turns that self-description into a
+ready-to-edit agent project — every field named, every bound stated, typed
+access to every value — in Python, Rust or C, at parity. Nothing here is
 per-environment.
 
 ## Ten lines to a real match
@@ -19,17 +20,19 @@ task quickstart ENV=go1-beacon   # setup → create-agent → build → a real l
 ```
 
 Not sure which environment? `task envs` lists every slug the platform
-currently publishes, with its modes — nothing is named in this repo, so
-`ENV=` is always yours to pass.
+currently publishes, with its modes and each mode's tags (the skill, the
+level, the domain) — nothing is named in this repo, so `ENV=` is always
+yours to pass.
 
 That ends with `out/archive.bin`: a whole match, scored by the real engine.
 Drop it on <https://lockstep.it/replay> to watch it. Then:
 
 ```sh
 task info ENV=go1-beacon         # what the environment IS — the brief and the wire, in this terminal
-# edit agents/my-bot/policy.py — every observation is a named slice away
+# edit agents/my-bot/policy.py — every observation is a named slice or column away
 task build AGENT=my-bot          # your hand-written policy, no training
 task train AGENT=my-bot          # or: a short PPO run → ONNX → parity check → the same bundle
+task train AGENT=my-bot RECIPE=supervised   # or: fit the truth the environment reveals (data environments)
 task match AGENT=my-bot          # your agent in every seat, archived to out/archive.bin
 task upload AGENT=my-bot         # compete (needs LOCKSTEP_API_KEY in .env)
 ```
@@ -84,13 +87,13 @@ For `task upload` only: an API key. Copy `.env.example` to `.env` and fill in
 
 | Command | What it does |
 |---|---|
-| `task doctor` | Check the machine: Python, Task, the CLI, the venv, the API key, and — exactly when you have agents in that language — the Rust/C toolchains. Each with its fix. |
+| `task doctor` | Check the machine: Python, Task, the CLI, the venv, the API key, and — exactly when you have agents in that language — the Rust/C toolchains. Each with its fix. Also what the engine cache holds, per environment and mode: its size and the data blobs or ONNX artifacts fetched beside the engine. |
 | `task quickstart ENV=` | Zero decisions: `setup` → `create-agent` (python) → `build` → `match`, then hands you the archive. |
-| `task envs` | List the environments you can create an agent for, from the platform — the slugs `ENV=` takes. |
+| `task envs` | List the environments you can create an agent for, from the platform — the slugs `ENV=` takes, each mode with its tags. |
 | `task setup LANGS=` | Provision toolchains — the ONE place that installs anything. `python` (default): `.venv` + the training stack. `rust`: the wasm target. `c`: wasi-sdk + wit-bindgen (detects an existing install first). |
-| `task create-agent NAME= ENV= MODE= LANG=` | Scaffold `agents/<name>/` from the engine's own declaration: a generated interface file (regenerable) + a policy stub that is YOURS (never overwritten). |
-| `task info ENV= MODE=` | The environment's brief and wire layout, from the engine you will build against. |
-| `task train AGENT= STEPS= NUM_ENVS= RESUME=1 PARALLEL=1` | PPO → ONNX → parity check → stage `agents/<name>/out/bundle` (python agents). |
+| `task create-agent NAME= ENV= MODE= LANG=` | Scaffold `agents/<name>/` from the engine's own declaration: a generated interface file (regenerable — every value, slice and column a named constant with its doc and unit, typed accessors, a typed action builder) + a policy stub and, for python, the network `model.py`, both YOURS (never overwritten). |
+| `task info ENV= MODE=` | The environment's brief and wire layout — goal, reward, what ends an episode, how you are scored, every value with its slices or columns and units, the tags, the budgets — from the engine you will build against. Fetches the release (engine, shell, any data blobs) into the cache. |
+| `task train AGENT= RECIPE= STEPS= NUM_ENVS= RESUME=1 PARALLEL=1 SEEDS= EPOCHS=` | Train → ONNX → parity check → stage `agents/<name>/out/bundle` (python agents). `RECIPE=ppo` (default) learns from the reward; `RECIPE=supervised` fits the truth the environment reveals. The network is the agent's own `model.py` either way. |
 | `task build AGENT=` | Build the bundle without training: python exports YOUR `policy.py`; rust/c compile the wasm component. |
 | `task match AGENT=` | A real local match through the CLI, every seat your agent, archived to `out/archive.bin`. |
 | `task upload AGENT= NAME= AGENT_ID=` | Upload the agent's bundle to compete (or seal it for an assessment). |
@@ -104,19 +107,44 @@ needs. `task info` prints, for the mode you are about to build against:
 
 - **The brief** — goal, what earns reward, what ends an episode, in the
   engine's words.
+- **How you are scored** — every metric the session reports, with its
+  unit and which direction is better, the headline ones first.
 - **What you see each tick** — every observation with dtype, shape and
-  bounds, then every slice with its index range, unit and meaning.
+  bounds, then every slice of a vector with its index range, unit and
+  meaning — or, for a table-shaped value, every column of its last axis
+  with its unit and meaning. A column whose unit is `code` carries its
+  code table right there.
 - **What you send back** — every action with per-slice bounds, the
   neutral action the world plays when you miss a tick, and the ONNX output
   convention.
-- **Budgets** — control rate, wall-clock per tick, missed ticks allowed,
-  memory cap, episode length, players.
+- **Tags and budgets** — the mode's assessment tags; control rate,
+  wall-clock per tick, missed ticks allowed, memory cap, episode length,
+  players.
 
 `task create-agent` writes the same facts into your agent as code —
-`interface.py` / `src/interface.rs` / `interface.h`, every slice a named
-constant with its doc, unit and bounds in a comment — so you never
-transcribe an index range from a web page again. Re-run it after a release
-bump to refresh (your policy files are never touched).
+`interface.py` / `src/interface.rs` / `interface.h`. The three files carry
+the same header (the brief, the metrics, the tags, the budgets, the
+neutral-action rule) and, per value, the same constants: name, dtype,
+shape, element count, bounds, the doc as a comment; per slice and per
+column an index constant with its doc and unit (and any code table,
+verbatim). Then each language's own typed access:
+
+- Python: `Obs(obs).<value>` — declaration-shaped numpy views, plus
+  `Obs(obs).<value>_<slice>` / `<value>_<column>`; `action(torque=…)`
+  builds one action in declared units, `normalized(...)` the same action
+  in the graph's `[-1, 1]` output convention.
+- Rust: a generated `Obs<'a>` with one method per value returning its
+  natural type (`&[f32; N]`, `&[[f32; F]; T]`, `&[u8]`, `&[i32]`) and an
+  `Action` struct with named fields and `encode()`.
+- C: `obs_<value>(&view, out)` typed accessors, `OBS_<VALUE>_ROWS` /
+  `_COLS` and `OBS_<VALUE>_COL_<NAME>` defines, an `agent_action_t`
+  struct with `agent_action_neutral` / `agent_action_encode`.
+
+The scaffolded policy stub in every language reads one observation
+through the typed accessor and answers the neutral action through the
+typed builder — so you never transcribe an index range from a web page
+again. Re-run `task create-agent` after a release bump to refresh (your
+policy files are never touched).
 
 `python -m lockstep_train.info --env <slug>` reads the platform's record of
 the release instead (no download, no wasm); `--json` emits it for scripts.
@@ -142,9 +170,16 @@ obs, info = env.reset(seed=0)
 
 - Observations are a `Dict` of named `Box`es, actions a `Box` with
   per-element bounds — both derived from the engine's own declaration.
-  Your generated `interface.py` names every slice of every observation, so
-  feature engineering reads `obs["body"][iface.OBS_BODY_JOINT_VEL]`, not
-  `obs["body"][7:19]`.
+  Your generated `interface.py` names every slice and column of every
+  observation, so feature engineering reads
+  `obs["body"][iface.OBS_BODY_JOINT_VEL]` or
+  `obs["feedback"][:, iface.OBS_FEEDBACK_COL_TRUTH]`, not `obs["body"][7:19]`.
+- The network `task train` builds is the agent's own `model.py` —
+  `build_policy(observation_space, action_space)`, scaffolded with one
+  named stream per observation. Keep it, or ignore it and bring your own.
+- Data environments reveal the truth of a decision after the fact;
+  `lockstep_train.LabelledStream` joins it back to the observation it
+  belongs to (see the supervised recipe below).
 - The per-tick `reward` and `done` come from the engine too: training and
   a live match are literally the same computation.
 - `gymnasium.make_vec(..., num_envs=8)` gets you the native vector env
@@ -225,6 +260,63 @@ On a multi-seat environment, `task train PARALLEL=1` trains BOTH seats with
 one shared policy over the generic PettingZoo view — the classic first rung
 of self-play. The exported artifact is unchanged.
 
+**Change the network**
+
+`agents/<name>/model.py` is yours. `task create-agent` writes it with one
+named stream per declared observation — the starter for every value,
+whatever its dtype or rank, is flatten → LayerNorm → Linear → ReLU — and
+`train/core/policy.py` adds the shared trunk and heads. Replace one line
+to give an image a convolution (a commented example is generated for an
+image-shaped `u8` value) or a history window a recurrent layer; the ONNX
+signature is unchanged because the graph's inputs are still the declared
+values at their declared shapes.
+
+**Learn from the truth the environment reveals (supervised)**
+
+Data environments score a decision after the fact: what was true about
+the transaction you saw at tick `t` arrives later — as a row of a
+*feedback window* (an observation whose rows are the decisions that
+resolved this tick, with columns saying how old each one is, what you
+decided and what was true) or as the reward `reward_lag_ticks` later.
+That makes them supervised-learning problems as much as control
+problems, and the template treats them so:
+
+```sh
+task train AGENT=my-bot RECIPE=supervised SEEDS=16 EPOCHS=20
+```
+
+It runs the engine over `SEEDS` public seeds playing the neutral action,
+joins every revealed truth to the observation it belongs to
+(`lockstep_train.LabelledStream`), fits a classifier head — or a
+regression head when the truth is not a small set of codes — on the same
+`model.py` trunk PPO uses, and exports with the declared signature: the
+prediction lands on the declared action as its code, everything else
+neutral. `agents/<name>/out/supervised.csv` has the per-epoch train and
+held-out loss and accuracy.
+
+Where the truth is found is never guessed. `task create-agent` writes a
+`[supervised]` block into `agent.toml` when the declaration reveals it — a
+value whose columns carry the documented names (`age_ticks`,
+`your_decision`, `truth`, and `valid` for padding) or a
+`reward_lag_ticks` in the metadata:
+
+```toml
+[supervised]
+value = "feedback"
+age_col = "age_ticks"
+decision_col = "your_decision"
+truth_col = "truth"
+valid_col = "valid"
+action = "decision"
+```
+
+Edit it if the environment names things differently (the names are the
+declaration's own — `task info` shows them), or pass the source on the
+command line: `.venv/bin/python -m train.main --agent my-bot --recipe
+supervised --label-value <obs>` or `--reward-lag <ticks>`. An agent whose
+declaration reveals no truth has no block, and the recipe says so
+instead of training on nothing.
+
 **Iterate on export without retraining**
 
 ```sh
@@ -240,7 +332,7 @@ task upload AGENT=my-bot AGENT_ID=<id-from-the-first-upload>
 **Refresh after a release bump**
 
 ```sh
-task create-agent NAME=my-bot ENV=<slug>       # regenerates interface.py + agent.toml
+task create-agent NAME=my-bot ENV=<slug>       # regenerates interface.py + agent.toml (policy.py, model.py untouched)
 task build AGENT=my-bot                        # rebuild against the new release
 ```
 
@@ -326,17 +418,18 @@ train/
   toolchain.py          `task setup LANGS=` — detect-first toolchain provisioning
   main.py               `task train` — train → export → parity-check → stage
   core/discovery.py     `task envs` + release resolution, both through the platform API
-  core/engine.py        the keyed engine cache (out/cache/<env>/<mode>/)
-  core/policy.py        the trainable network, derived from the declared spaces
+  core/engine.py        the keyed engine cache (out/cache/<env>/<mode>/ — engine, shell, data blobs, ONNX artifacts)
+  core/policy.py        the trunk and heads around the agent's streams; obs → tensor plumbing; the ONNX contract
   core/train.py         a small real PPO loop (vectorized, SAME_STEP)
   core/self_play.py     shared-policy self-play over the PettingZoo view
+  core/supervised.py    the supervised recipe: collect the revealed truth, fit a head, export
   core/export.py        ONNX export + torch/onnxruntime parity proof
   core/stage.py         the submittable bundle (manifest v2)
 reference/
   rust-wire/            the hand-written Rust wire reader the rust scaffold vendors, pinned by the spec goldens
   c-wire/               its C99 twin (wire.h/wire.c), pinned by the same goldens
 wit/                    the agent WIT world every wasm agent targets (vendored)
-agents/                 YOUR agents (created by task create-agent; build products gitignored)
+agents/                 YOUR agents (created by task create-agent: interface + policy + model.py; build products gitignored)
 tests/                  hermetic tests + engine-backed semantics proofs + scaffold compile tests
 ```
 
@@ -363,11 +456,13 @@ task build AGENT=clanger && task match AGENT=clanger
 ```
 
 The scaffold is a complete project: the vendored WIT world, a hand-written
-wire reader (`wire.rs` / `wire.c` — ~300 dependency-free lines,
+wire reader (`wire.rs` / `wire.c` — ~530 dependency-free lines,
 re-implemented from the published spec and pinned by its goldens under
 `reference/`), a generated `interface.rs` / `interface.h` naming every
-declared slice, and a stub that answers the neutral action until you edit
-it. No ONNX, no Python at match time — `on-tick` in, action out.
+declared value, slice and column with typed accessors and a typed action
+builder, and a stub that reads one observation through them and answers
+the neutral action until you edit it. No ONNX, no Python at match time —
+`on-tick` in, action out.
 
 Determinism is the platform's core bet: the engine is bit-identical across
 machines, so a local match IS a ranked match with different seats. The
@@ -381,11 +476,13 @@ archive your match writes (`out/archive.bin`) drops straight onto
 
 Every engine describes itself at seat-init: named observations and actions
 with dtype, shape, bounds (per-element where it matters), documented
-slices with units, free-form metadata, and the seat's brief — goal,
-reward, what ends an episode. Every tick after that is positional,
-near-raw blobs the declaration explains. Little-endian, no codegen — the
-spec fits on a page ([docs/wire.md](docs/wire.md) — vendored here from the
-platform's interface repo at every release), and `reference/rust-wire` +
+slices with units (or documented columns, for a table-shaped value),
+free-form metadata, the seat's brief — goal, reward, what ends an episode
+— and the metrics the session will report, each with a unit and a
+direction. Every tick after that is positional, near-raw blobs the
+declaration explains. Little-endian, no codegen — the spec fits on a page
+([docs/wire.md](docs/wire.md) — vendored here from the platform's
+interface repo at every release), and `reference/rust-wire` +
 `reference/c-wire` re-implement it from scratch to prove the point. The
 generic ONNX shell, the Python env, `task info`, the environment's
 Interface page, your generated interface files and your hand-written agent

@@ -33,7 +33,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .agents import AgentConfig, resolve_agent
+from .agents import AgentConfig, import_agent_module, resolve_agent
 from .core import utf8_output
 from .core.engine import ensure_engine
 from .core.stage import provenance, provenance_toml, stage
@@ -68,38 +68,28 @@ def bundle_component(cfg: AgentConfig, component: Path) -> Path:
 
 
 def build_python(cfg: AgentConfig) -> Path:
-    import importlib
-
     import torch  # noqa: F401 — fail here, with the venv hint, not deeper
 
     from .core.export import export, verify
+    from .core.policy import declared_dtype
     from .main import engine_identity
 
     paths = ensure_engine(cfg.env, cfg.mode)
     mode, payload_schema_version = engine_identity(paths.engine)
 
-    # The agent's own policy module (agents/<name>/policy.py). Loaded with
-    # the agent dir on sys.path (names like `my-bot` are not importable as
-    # packages); its generated sibling `interface.py` resolves the same way.
-    sys.path.insert(0, str(cfg.dir.resolve()))
-    try:
-        importlib.invalidate_caches()
-        policy_mod = importlib.import_module("policy")
-    finally:
-        sys.path.pop(0)
+    # The agent's own policy module (agents/<name>/policy.py); its generated
+    # sibling `interface.py` resolves the same way.
+    policy_mod = import_agent_module(cfg, "policy")
 
     # Signature straight from the engine's declaration, exactly as the
-    # generic shell will bind it at match time.
-    import numpy as np
+    # generic shell will bind it at match time: declared shapes, declared
+    # dtypes ("uint8" arrives in the graph as f32 ÷ 255, "int32" as int32).
     from lockstep_train.env import LockstepEnv
 
     env = LockstepEnv(engine_source=str(paths.engine))
     try:
         shapes = {n: tuple(int(d) for d in b.shape) for n, b in env.observation_space.spaces.items()}
-        dtypes = {
-            n: "int32" if b.dtype == np.int32 else "float32"
-            for n, b in env.observation_space.spaces.items()
-        }
+        dtypes = {n: declared_dtype(b) for n, b in env.observation_space.spaces.items()}
         (action_len,) = env.action_space.shape
     finally:
         env.close()

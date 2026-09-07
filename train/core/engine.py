@@ -7,12 +7,19 @@ story into a cache keyed by (environment, mode)::
 
     out/cache/<env>/<mode>/engine.wasm       the mode's engine — what you train against
     out/cache/<env>/<mode>/agent-onnx.wasm   the generic ONNX agent shell — what you ship
+    out/cache/<env>/<mode>/data/<name>       read-only blobs the engine reads (when it does)
+    out/cache/<env>/<mode>/artifacts/<name>.onnx   ONNX models the engine itself runs
 
 The shell is generic across every environment (it reads the Lockstep-wire
 declaration and binds ONNX inputs by name), but it is versioned WITH the
 release, so it is fetched from the same release directory rather than
-pinned here. Each file gets a ``.url`` stamp so unchanged re-runs are
-no-ops, and the keyed layout means switching ``ENV``/``MODE`` can never
+pinned here. The engine and the shell each get a ``.url`` stamp so
+unchanged re-runs are no-ops; blobs and artifacts are pinned by digest in
+the platform's record of the release and fetched through
+``lockstep_train.fetch`` (verified, skipped when already right, refused
+when the CDN serves something else). ``lockstep_train`` finds ``data/``
+and ``artifacts/`` beside the engine on its own, so nothing here passes
+them around. The keyed layout means switching ``ENV``/``MODE`` can never
 silently replace an engine another task just fetched — the old
 single-slot ``out/engine.wasm`` footgun (a mode switch played out as an
 agent reading garbage) is structurally gone.
@@ -120,9 +127,12 @@ def fetch_file(url: str, out: Path) -> bool:
 
 
 def fetch_release(release: EnvRelease, out_dir: Path) -> dict[str, Path]:
-    """Engine + generic agent shell into ``out_dir``; ``{name: path}``.
+    """Engine + generic agent shell + the release's pinned blobs and ONNX
+    artifacts into ``out_dir``; ``{relative name: path}``.
 
     Progress goes to stderr so callers can capture stdout cleanly."""
+    from lockstep_train.fetch import ARTIFACTS_DIR, DATA_DIR, fetch_pinned
+
     written = {}
     for name, url in (
         ("engine.wasm", release.engine_url),
@@ -134,6 +144,25 @@ def fetch_release(release: EnvRelease, out_dir: Path) -> dict[str, Path]:
         else:
             print(f"✓ {path} up to date", file=sys.stderr)
         written[name] = path
+    # Blobs and artifacts: the same layout `python -m lockstep_train.fetch`
+    # writes, the same digest check. No `.url` stamp — the pin IS the
+    # provenance, and a stamp inside data/ would itself be installed as a
+    # blob.
+    for entry, sub, file_name in [
+        *((d, DATA_DIR, d.name) for d in release.data),
+        *((a, ARTIFACTS_DIR, a.file_name) for a in release.artifacts),
+    ]:
+        path = out_dir / sub / file_name
+        url = release.blob_url(entry)
+        try:
+            fetched = fetch_pinned(url, path, entry.sha256, entry.bytes)
+        except RuntimeError as e:
+            raise SystemExit(str(e)) from e
+        if fetched:
+            print(f"→ {path}  ({entry.bytes} bytes, sha256 {entry.sha256[:12]}…)", file=sys.stderr)
+        else:
+            print(f"✓ {path} up to date", file=sys.stderr)
+        written[f"{sub}/{file_name}"] = path
     return written
 
 

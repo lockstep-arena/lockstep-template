@@ -3,20 +3,29 @@
 One command (``task train AGENT=<name>`` runs it), for ANY published
 environment::
 
-    python -m train.main --agent <name> --steps 8192
+    python -m train.main --agent <name> --steps 8192                 # PPO
+    python -m train.main --agent <name> --recipe supervised --seeds 16  # fit the revealed truth
 
 The agent's ``agent.toml`` (written by ``task create-agent``) names the
 environment and mode, so the right engine is resolved from the keyed cache
 and a mode mismatch is impossible. Checkpoints, the exported ONNX and the
 staged bundle all land under ``agents/<name>/out/``.
 
+Two recipes, one network. ``ppo`` (the default) runs the PPO loop in
+``train/core/train.py``; ``supervised`` runs ``train/core/supervised.py``
+— collect ``(observation, truth)`` pairs from the engine's feedback (or
+its lagged reward) and fit a classifier head. Both build the network from
+the agent's OWN ``model.py`` (``build_policy``, scaffolded from the
+declaration; the stock flat-stream network when the file is absent), and
+both end at the same export → parity → stage path.
+
 Nothing here is per-environment: the env, its spaces and its reward come
-from the engine wasm's own declaration (``lockstep_train``
-reads it), and the staged bundle pairs your trained ``policy.onnx`` with
-the GENERIC agent shell fetched from the same release (the keyed cache
-under ``out/cache/<env>/<mode>/`` — see ``train.core.engine``). The staged bundle is
-what the platform actually consumes — and what ``lockstep match run`` /
-``lockstep agent upload`` take directly::
+from the engine wasm's own declaration (``lockstep_train`` reads it), and
+the staged bundle pairs your trained ``policy.onnx`` with the GENERIC
+agent shell fetched from the same release (the keyed cache under
+``out/cache/<env>/<mode>/`` — see ``train.core.engine``). The staged
+bundle is what the platform actually consumes — and what ``lockstep match
+run`` / ``lockstep agent upload`` take directly::
 
     agents/<name>/out/bundle/
       lockstep.toml        declares the `policy` artifact by NAME
@@ -34,13 +43,16 @@ import torch
 
 from .core import utf8_output
 from .core.export import export, verify
-from .core.policy import policy_from_signature
+from .core.policy import Policy, policy_from_signature
 from .core.self_play import train_self_play
 from .core.stage import provenance, stage
+from .core.supervised import LabelSource, SupervisedPolicy, train_supervised
 from .core.train import default_num_envs, train
 
 OUT_DIR = Path("out")
 BUNDLE_DIR = OUT_DIR / "agent-bundle"
+
+RECIPES = ("ppo", "supervised")
 
 
 def engine_identity(engine: Path) -> tuple[str, int]:
@@ -54,6 +66,38 @@ def engine_identity(engine: Path) -> tuple[str, int]:
 
     session = Session(engine_source=str(engine))
     return session.mode, session.payload_schema_version
+
+
+def save_weights(path: Path, net, recipe: str) -> None:
+    """The weights file ``--from-weights`` reloads: the space signature,
+    the state dict, the recipe, and — for a supervised head — where its
+    prediction lands and which codes it chooses between."""
+    blob = {
+        "recipe": recipe,
+        "action_len": net.action_len,
+        "spaces": net.space_signature(),
+        "state_dict": net.state_dict(),
+    }
+    if isinstance(net, SupervisedPolicy):
+        blob["supervised"] = net.head_signature()
+    torch.save(blob, path)
+
+
+def load_weights(path: Path, build) -> torch.nn.Module:
+    """Rebuild the network a weights file describes — through the agent's
+    ``build_policy`` so the streams match — and load its state."""
+    from gymnasium import spaces
+
+    blob = torch.load(path, weights_only=True, map_location="cpu")
+    base = policy_from_signature(blob["spaces"], build)
+    if blob.get("recipe") == "supervised":
+        head = blob["supervised"]
+        action_space = spaces.Box(-1.0, 1.0, (blob["action_len"],), dtype="float32")
+        net = SupervisedPolicy(base, action_space, head["element"], head["classes"])
+    else:
+        net = base
+    net.load_state_dict(blob["state_dict"])
+    return net
 
 
 def main() -> None:
@@ -71,12 +115,45 @@ def main() -> None:
         help="environment slug — only without --agent; outputs land in out/",
     )
     p.add_argument(
+        "--recipe",
+        default="ppo",
+        choices=RECIPES,
+        help="ppo (default): reinforcement learning on the reward; supervised: "
+        "fit the truth the environment reveals (RECIPE= on the task line)",
+    )
+    p.add_argument(
         "--steps",
         type=int,
         default=8192,
-        help="environment steps. The default is a SHORT run: it produces a real "
+        help="environment steps (ppo). The default is a SHORT run: it produces a real "
         "policy, not a good one — and on sparse rewards, steps alone will not "
         "either (see the README's reward-landscape section).",
+    )
+    p.add_argument(
+        "--seeds",
+        type=int,
+        default=16,
+        help="supervised: how many public seeds to collect labelled observations from (SEEDS=)",
+    )
+    p.add_argument(
+        "--epochs",
+        type=int,
+        default=20,
+        help="supervised: passes over the collected pairs (EPOCHS=)",
+    )
+    p.add_argument(
+        "--label-value",
+        default=None,
+        help="supervised: the feedback-window observation to read labels from "
+        "(overrides agent.toml's [supervised]; columns keep the documented "
+        "names age_ticks / your_decision / truth / valid)",
+    )
+    p.add_argument(
+        "--reward-lag",
+        type=int,
+        default=None,
+        help="supervised: label each decision with the reward this many ticks "
+        "later instead of a feedback window",
     )
     p.add_argument("--time-limit-ticks", type=int, default=1800)
     p.add_argument("--seed", type=int, default=0)
@@ -105,7 +182,7 @@ def main() -> None:
     p.add_argument(
         "--resume",
         action="store_true",
-        help="continue a crashed/stopped run from out/checkpoint.pt (written "
+        help="ppo: continue a crashed/stopped run from out/checkpoint.pt (written "
         "every rollout) up to --steps",
     )
     p.add_argument(
@@ -122,13 +199,13 @@ def main() -> None:
         "--num-envs",
         type=int,
         default=None,
-        help=f"parallel engine instances for collection (default {default_num_envs()} "
+        help=f"ppo: parallel engine instances for collection (default {default_num_envs()} "
         "here; one env pins one core)",
     )
     p.add_argument(
         "--parallel",
         action="store_true",
-        help="self-play: train BOTH seats at once with one shared policy over "
+        help="ppo self-play: train BOTH seats at once with one shared policy over "
         "the generic PettingZoo parallel env (multi-seat engines only)",
     )
     args = p.parse_args()
@@ -138,9 +215,13 @@ def main() -> None:
             "--parallel drives ONE parallel env (PettingZoo has no vector "
             "API; the engine is not the bottleneck) — drop --num-envs"
         )
+    if args.parallel and args.recipe == "supervised":
+        raise SystemExit("--parallel is a PPO option; the supervised recipe drives one seat")
 
+    build = Policy
+    supervised_block: dict | None = None
     if args.agent or not args.env:
-        from .agents import resolve_agent
+        from .agents import policy_builder, resolve_agent
 
         cfg = resolve_agent(args.agent)
         if cfg.lang != "python":
@@ -150,6 +231,12 @@ def main() -> None:
             )
         env_slug, env_mode = cfg.env, args.mode or cfg.mode
         out_dir, bundle_dir = cfg.out_dir, cfg.bundle_dir
+        build = policy_builder(cfg)
+        supervised_block = cfg.supervised
+        if (cfg.dir / "model.py").is_file():
+            print(f"── network: {cfg.dir / 'model.py'} (build_policy)")
+        else:
+            print("── network: the stock flat-stream policy (no model.py in the agent dir)")
     else:
         env_slug, env_mode = args.env, args.mode
         out_dir, bundle_dir = OUT_DIR, BUNDLE_DIR
@@ -166,11 +253,41 @@ def main() -> None:
         engine, shell = paths.engine, paths.shell
     mode, payload_schema_version = engine_identity(engine)
 
+    recipe = args.recipe
     if args.from_weights:
         print(f"── loading weights {args.from_weights}")
-        blob = torch.load(args.from_weights, weights_only=True, map_location="cpu")
-        net = policy_from_signature(blob["spaces"])
-        net.load_state_dict(blob["state_dict"])
+        net = load_weights(Path(args.from_weights), build)
+        recipe = "supervised" if isinstance(net, SupervisedPolicy) else "ppo"
+    elif recipe == "supervised":
+        if args.reward_lag is not None:
+            source = LabelSource(reward_lag=args.reward_lag)
+        elif args.label_value:
+            source = LabelSource(value=args.label_value, valid_col="valid")
+        elif supervised_block:
+            source = LabelSource.from_block(supervised_block)
+        else:
+            raise SystemExit(
+                "this agent's agent.toml has no [supervised] block — the declaration "
+                "reveals no feedback window with the documented columns and no "
+                "reward lag. Name the source yourself: --label-value <obs> or "
+                "--reward-lag <ticks> (task train RECIPE=supervised passes them through), "
+                "or train with PPO."
+            )
+        print(f"── supervised training {env_slug} [{mode}] over {args.seeds} seeds, {args.epochs} epochs")
+        net = train_supervised(
+            engine=str(engine),
+            source=source,
+            build=build,
+            seeds=args.seeds,
+            epochs=args.epochs,
+            time_limit_ticks=args.time_limit_ticks,
+            seed=args.seed,
+            device=args.device,
+            out_dir=out_dir,
+        )
+        weights = out_dir / "policy.pt"
+        save_weights(weights, net, "supervised")
+        print(f"→ weights: {weights}")
     elif args.parallel:
         print(
             f"── self-play training {env_slug} [{mode}] for {args.steps} "
@@ -184,6 +301,7 @@ def main() -> None:
             device=args.device,
             out_dir=out_dir,
             resume=args.resume,
+            build=build,
         )
     else:
         print(f"── training {env_slug} [{mode}] for {args.steps} steps")
@@ -196,16 +314,10 @@ def main() -> None:
             device=args.device,
             out_dir=out_dir,
             resume=args.resume,
+            build=build,
         )
         weights = out_dir / "policy.pt"
-        torch.save(
-            {
-                "action_len": net.action_len,
-                "spaces": net.space_signature(),
-                "state_dict": net.state_dict(),
-            },
-            weights,
-        )
+        save_weights(weights, net, "ppo")
         print(f"→ weights: {weights}")
 
     onnx = export(net, out_dir / "policy.onnx")
@@ -214,6 +326,18 @@ def main() -> None:
     diff = verify(net, onnx)
     print(f"✓ torch/onnxruntime parity: max abs diff {diff:.3e}")
 
+    if args.from_weights:
+        provenance_table = None
+    elif recipe == "supervised":
+        provenance_table = provenance(steps=args.seeds, num_envs=1, trained=True)
+        provenance_table["recipe"] = "supervised"
+    else:
+        provenance_table = provenance(
+            steps=args.steps,
+            num_envs=1 if args.parallel else (args.num_envs or default_num_envs()),
+            trained=True,
+        )
+        provenance_table["recipe"] = "ppo"
     bundle = stage(
         env_slug,
         mode,
@@ -221,13 +345,7 @@ def main() -> None:
         onnx,
         shell,
         bundle_dir,
-        provenance_table=None
-        if args.from_weights
-        else provenance(
-            steps=args.steps,
-            num_envs=1 if args.parallel else (args.num_envs or default_num_envs()),
-            trained=True,
-        ),
+        provenance_table=provenance_table,
     )
     print(f"→ bundle: {bundle}")
     print("\nRun it:   task match\nCompete:  task upload")
