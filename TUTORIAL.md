@@ -41,6 +41,7 @@ that language exists under `agents/`.
 - [Part 1 — create an agent](#part-1--create-an-agent)
 - [Part 2 — a hand-written policy (no training)](#part-2--a-hand-written-policy-no-training)
 - [Part 3 — a trained agent](#part-3--a-trained-agent)
+- [Data environments: the supervised recipe](#data-environments-the-supervised-recipe)
 - [Part 4 — reading a match](#part-4--reading-a-match)
 - [Part 5 — compete](#part-5--compete)
 - [The advanced track: Rust and C](#the-advanced-track-rust-and-c)
@@ -163,7 +164,13 @@ BUDGETS
 ```
 
 That is the whole contract: 54 floats in, 12 joint targets out, and the
-reward you will train on spelled out by the engine that computes it. The
+reward you will train on spelled out by the engine that computes it. An
+environment with table-shaped values — a history window, a feedback
+window of resolved decisions — prints each column of the last axis the
+same way, with its unit and meaning (and a column whose unit is `code`
+carries its code table right there); a `HOW YOU ARE SCORED` block names
+every metric the report will show, and a `TAGS` line the mode's
+assessment tags. The
 same declaration renders as the environment's
 [Interface tab](https://lockstep.it/exhibitions/environment/go1-beacon/interface);
 `python -m lockstep_train.info --env go1-beacon` prints it without
@@ -183,8 +190,9 @@ task create-agent NAME=walker ENV=go1-beacon
 ```
 
 ```
-→ agents/walker/policy.py  (yours — edit it)
 → agents/walker/interface.py  (generated)
+→ agents/walker/policy.py  (yours — edit it)
+→ agents/walker/model.py  (yours — edit it)
 → agents/walker/agent.toml  (generated)
 
 create-agent: walker ready — go1-beacon [default] in python.
@@ -192,10 +200,15 @@ next: edit agents/walker/  then  task train AGENT=walker
 ```
 
 Everything `task info` printed is now CODE in your agent —
-`agents/walker/interface.py` opens with the brief and budgets as its
-docstring, then names every slice:
+`agents/walker/interface.py` opens with the brief, the metrics, the
+budgets and the neutral-action rule as its docstring, then names every
+value, slice and column:
 
 ```python
+# ── obs ── f32[54] — 54 element(s), bounds [-inf, inf] every element
+# Everything the policy sees this tick: trunk pose and rates, the 12
+# joints, the previous targets, where the beacon is from the trunk, and
+# how much time is left. …
 OBS_OBS = "obs"
 OBS_OBS_INDEX = 0
 OBS_OBS_SHAPE = (54,)
@@ -207,16 +220,31 @@ OBS_OBS_JOINT_POS = slice(10, 22)
 OBS_OBS_BEACON_BODY = slice(46, 49)
 …
 ACT_ACTION_SHAPE = (12,)
-# front-right leg: hip abduction, thigh, calf targets [rad] — per-element bounds
+# front-right leg: hip abduction, thigh, calf targets [rad] — per-element bounds [-2.818..4.501], varying
 ACT_ACTION_FR = slice(0, 3)
 ```
+
+A table-shaped value gets `OBS_<VALUE>_ROWS`, `OBS_<VALUE>_COLS` and one
+`OBS_<VALUE>_COL_<NAME>` constant per column, each with its doc and unit.
+Below the constants come the typed accessors: `Obs(obs).obs_joint_pos`
+is the joint-angle slice as a numpy array, `Obs(obs).<value>_<column>`
+a column of every row, and `action(fr=[0, 0.9, -1.8], ...)` builds one
+action in declared units (`normalized(...)` the same action in the
+graph's `[-1, 1]` output convention). The scaffolded `policy.py` reads
+one observation that way and answers the neutral action.
+
+The third file, `model.py`, is the network `task train` builds: one
+named stream per declared observation, with its shape in a comment, and
+the starter stream (flatten → LayerNorm → Linear → ReLU) for every value
+whatever its dtype or rank. Replace one line to change a stream — an
+image-shaped `u8` value comes with a commented-out convolution.
 
 You never transcribe an index range from a web page again — and after a
 release bump, re-running `task create-agent NAME=walker ENV=go1-beacon`
 refreshes `interface.py` and `agent.toml` while **never touching**
-`policy.py`. The other generated file, `agent.toml`, is the agent's
-identity — environment, mode, language, the release it was generated from
-— and every later command reads it, which is why none of them need `ENV=`.
+`policy.py` or `model.py`. `agent.toml` is the agent's identity —
+environment, mode, language, the release it was generated from — and
+every later command reads it, which is why none of them need `ENV=`.
 
 ## Part 2 — a hand-written policy (no training)
 
@@ -274,6 +302,7 @@ task train AGENT=walker STEPS=64 NUM_ENVS=1     # tiny — proves the pipeline i
 ```
 
 ```
+── network: agents/walker/model.py (build_policy)
 ── training go1-beacon [default] for 64 steps
   update device: mps   envs: 1 (SyncVectorEnv)
       128/64 steps  episodes=3    mean_return=   -0.86     0.4s
@@ -286,10 +315,11 @@ Run it:   task match
 Compete:  task upload
 ```
 
-The network was built from the declaration in Part 0: a LayerNorm+MLP
-stream for `obs` into a 12-wide tanh head — and that tanh head is not a
-style choice: the ONNX shell reads outputs in `[-1, 1]` and maps each one
-onto its joint's declared range. The parity line is the load-bearing one:
+The network is the one in `agents/walker/model.py`, scaffolded from the
+declaration in Part 0: a flatten → LayerNorm → Linear stream for `obs`,
+then the template's trunk and a 12-wide tanh head — and that tanh head is
+not a style choice: the ONNX shell reads outputs in `[-1, 1]` and maps
+each one onto its joint's declared range. The parity line is the load-bearing one:
 the exported graph and the trained network are held to the same numbers
 under onnxruntime — the exact runtime the platform's inference host uses.
 The trained bundle lands in the same slot `task build` used —
@@ -301,6 +331,67 @@ For a policy that actually walks, `STEPS=64` becomes millions and
 look like before you spend the compute. See the README's
 [reward landscape](README.md#the-reward-landscape-read-before-a-long-run)
 note first.
+
+## Data environments: the supervised recipe
+
+Some environments are not control problems at all: you see a
+transaction, a ticket, a sensor window, and decide; what was actually
+true arrives later — as a row of a *feedback window* (an observation
+whose rows are the decisions that resolved this tick, with columns saying
+how old each one is, what you decided and what was true) or as the reward
+`reward_lag_ticks` later. `task info` shows both: the window's columns
+with their units, or a `REWARD LAG` line.
+
+When the declaration reveals its truth that way, `task create-agent`
+writes where to find it into `agent.toml`:
+
+```toml
+[supervised]
+value = "feedback"
+age_col = "age_ticks"
+decision_col = "your_decision"
+truth_col = "truth"
+valid_col = "valid"
+action = "decision"
+```
+
+and the second recipe reads it:
+
+```sh
+task train AGENT=triager RECIPE=supervised SEEDS=16 EPOCHS=20
+```
+
+```
+── network: agents/triager/model.py (build_policy)
+── supervised training <slug> [<mode>] over 16 seeds, 20 epochs
+  label source: rows of `feedback` — columns age_ticks / your_decision / truth (rows with valid = 0 are padding)
+  collected 3812 labelled observations from 16 seeds (4800 ticks, 0 labels with no observation to join) in 3.1s
+  classification over declared codes {0: 3488, 1: 324}
+  epoch   1/20  train_loss=0.6421  val_loss=0.5133  val_accuracy=0.812     3.9s
+  …
+→ weights: agents/triager/out/policy.pt
+→ onnx: agents/triager/out/policy.onnx (160022 bytes)
+✓ torch/onnxruntime parity: max abs diff 7.451e-08
+→ bundle: agents/triager/out/bundle
+```
+
+The engine ran over 16 public seeds playing the neutral action; every
+revealed truth was joined back to the observation it belongs to
+(`lockstep_train.LabelledStream`, the same join you can use in your own
+loop); a classifier head was fit on the `model.py` trunk with the rare
+class weighted up; and the export keeps the declared signature — the
+prediction lands on the declared action as its code, everything else
+neutral. `agents/triager/out/supervised.csv` has the per-epoch numbers.
+The bundle is the same shape as a PPO one, so `task match` and `task
+upload` do not care which recipe made it.
+
+Where the truth lives is never guessed: the block above is generated from
+the declaration's own column names. If an environment names them
+differently, edit the block (`task info` shows the names), or say it on
+the command line — `.venv/bin/python -m train.main --agent triager
+--recipe supervised --label-value <obs>` or `--reward-lag <ticks>`. An
+agent whose declaration reveals no truth gets no block, and the recipe
+refuses with that reason instead of training on nothing.
 
 ## Part 4 — reading a match
 
@@ -355,12 +446,27 @@ task match AGENT=ferrous
 ```
 
 The scaffold is a complete cargo project: the vendored WIT world, the
-hand-written wire reader (`src/wire.rs`, ~300 dependency-free lines pinned
+hand-written wire reader (`src/wire.rs`, ~530 dependency-free lines pinned
 by the spec goldens under `reference/rust-wire/`), a generated
-`src/interface.rs` where every slice is a named `Range<usize>` with its
-doc, and `src/lib.rs` — yours — answering the neutral action until you
-edit `on_tick`. `task build` compiles it to a `wasm32-wasip2` component
-and bundles it; the same `task match`/`task upload` run it.
+`src/interface.rs`, and `src/lib.rs` — yours — answering the neutral
+action until you edit `on_tick`. The interface carries the same header
+and constants as the Python one (every slice a `Range<usize>` with its
+doc and unit, every column a `COL_<NAME>` index) and then typed access in
+Rust's own terms: `Obs::read(&view)` decodes the view into a struct with
+one method per value returning its natural type — `&[f32; 54]` here, a
+`&[[f32; 8]; 16]` for a history window, `&[u8]` for an image — and
+`Action { fr: [0.0, 0.9, -1.8], ..Action::neutral() }.encode()` builds
+the input by name:
+
+```rust
+let Some(obs) = Obs::read(&view) else { return Vec::new() };
+// `obs[trunk_quat]` — trunk orientation
+let _first = &obs.obs()[interface::obs::obs::TRUNK_QUAT];
+Action::neutral().encode()
+```
+
+`task build` compiles it to a `wasm32-wasip2` component and bundles it;
+the same `task match`/`task upload` run it.
 
 C is the same shape:
 
@@ -373,9 +479,27 @@ task match AGENT=clanger
 
 `agents/clanger/` holds `wire.h`/`wire.c` (the C99 twin of the Rust
 reader, pinned by the same goldens under `reference/c-wire/`), a generated
-`interface.h` of `#define`s, `agent.c` — yours — and a one-clang-line
-`build.sh`: wit-bindgen generates the world bindings, wasi-sdk's clang
-links the component directly. Bytes in, bytes out.
+`interface.h`, `agent.c` — yours — and a one-clang-line `build.sh`:
+wit-bindgen generates the world bindings, wasi-sdk's clang links the
+component directly. The header is the same declaration again as
+`#define`s (`OBS_OBS_TRUNK_QUAT_START` / `_LEN`, `OBS_<VALUE>_ROWS` /
+`_COLS` / `_COL_<NAME>`, the shape and bounds arrays) plus typed access:
+`obs_obs(&view, out)` copies the value into a declaration-shaped array
+(`float out[16][8]` for a window; a `u8` value is borrowed as bytes), and
+`agent_action_t` with `agent_action_neutral` / `agent_action_encode`
+builds the input by named field:
+
+```c
+float obs[54];
+if (obs_obs(&view, obs)) {
+    float first = obs[OBS_OBS_TRUNK_QUAT_START];   /* trunk orientation */
+}
+agent_action_t action;
+agent_action_neutral(&action);
+agent_action_encode(&action, &ret->ptr, &ret->len);
+```
+
+Bytes in, bytes out.
 
 ## Two seats learning at once
 
@@ -403,9 +527,12 @@ upload` work identically.
 ## Where to go from here
 
 - Swap the training loop for your own stack — the env is plain
-  `gymnasium.make("Lockstep/Env-v0", engine_source=...)`, and your
-  generated `interface.py` names every feature; the README's
-  [BYO section](README.md#commands) is the seam.
+  `gymnasium.make("Lockstep/Env-v0", engine_source=...)`, your
+  generated `interface.py` names every feature, and `model.py` is yours
+  to rewrite; the README's [BYO section](README.md#commands) is the seam.
+- On a data environment, start from `RECIPE=supervised` and compare it
+  with PPO on the same seeds — `task match` scores both with the same
+  engine.
 - Try another environment: `task info ENV=panda-pick`, then
   `task create-agent NAME=picky ENV=panda-pick` — same commands, a MuJoCo
   arm, its own brief.

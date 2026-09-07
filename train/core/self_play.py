@@ -42,7 +42,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from .policy import Policy, actions_to_env, obs_to_tensors
+from .policy import Policy, PolicyBuilder, actions_to_env, obs_to_tensors
 from .train import METRICS_FIELDS, discounted_advantages, pick_device, save_checkpoint
 
 #: metrics.csv columns — the single-seat layout plus one self-play column.
@@ -95,6 +95,7 @@ def train_self_play(
     device: str | None = None,
     out_dir: Path = Path("out"),
     resume: bool = False,
+    build: PolicyBuilder = Policy,
 ) -> Policy:
     """Train one policy on every seat's experience of one parallel env.
 
@@ -123,7 +124,7 @@ def train_self_play(
                 f"seat {a!r} has different spaces from {agents[0]!r}; a shared "
                 "policy needs symmetric seats"
             )
-    net = Policy(obs_space, act_space)
+    net = build(obs_space, act_space)
 
     dev = torch.device(device) if device else pick_device()
     if dev.type == "cuda":
@@ -133,7 +134,7 @@ def train_self_play(
     else:
         # `net` is the CPU rollout copy; `learner` takes the gradient steps
         # on the accelerator and syncs back each rollout.
-        learner = Policy(obs_space, act_space).to(dev)
+        learner = build(obs_space, act_space).to(dev)
         learner.load_state_dict(net.state_dict())
     opt = torch.optim.Adam(learner.parameters(), lr=lr)
 

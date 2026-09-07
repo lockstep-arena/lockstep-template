@@ -42,7 +42,7 @@ import numpy as np
 import torch
 from gymnasium.vector import AsyncVectorEnv, AutoresetMode, SyncVectorEnv
 
-from .policy import Policy, actions_to_env, obs_to_tensors
+from .policy import Policy, PolicyBuilder, actions_to_env, obs_to_tensors
 
 #: metrics.csv column order (one row per rollout).
 METRICS_FIELDS = [
@@ -251,11 +251,15 @@ def train(
     device: str | None = None,
     out_dir: Path = Path("out"),
     resume: bool = False,
+    build: PolicyBuilder = Policy,
 ) -> Policy:
+    """PPO over ``num_envs`` engines; ``build`` makes the network from the
+    two spaces — the agent's ``model.build_policy`` when it has one, else
+    the stock :class:`Policy` (a flat stream per value)."""
     torch.manual_seed(seed)
     num_envs = num_envs if num_envs is not None else default_num_envs()
     env = make_vec_env(engine, time_limit_ticks, num_envs)
-    net = Policy(env.single_observation_space, env.single_action_space)
+    net = build(env.single_observation_space, env.single_action_space)
 
     dev = torch.device(device) if device else pick_device()
     if dev.type == "cuda":
@@ -266,7 +270,7 @@ def train(
     else:
         # `net` stays the CPU rollout copy; `learner` takes the gradient
         # steps on the accelerator and syncs weights back each rollout.
-        learner = Policy(env.single_observation_space, env.single_action_space).to(dev)
+        learner = build(env.single_observation_space, env.single_action_space).to(dev)
         learner.load_state_dict(net.state_dict())
     opt = torch.optim.Adam(learner.parameters(), lr=lr)
 

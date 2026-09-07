@@ -34,11 +34,29 @@ def _default_engine() -> str:
 
 ENGINE = Path(os.environ.get("LOCKSTEP_TEST_ENGINE") or _default_engine())
 
-pytestmark = pytest.mark.skipif(
-    not ENGINE.is_file(),
-    reason=f"no engine at {ENGINE} — run: task info ENV=<slug> (or set LOCKSTEP_TEST_ENGINE)",
 
-)
+def _unusable(engine: Path) -> str | None:
+    """Why this engine cannot back the tests, or ``None`` when it can: it is
+    missing, or it was published before the installed ``lockstep_train``'s
+    declaration layout and its seat-init no longer decodes (a stale cache
+    refreshes on the next ``task info`` once the release is republished)."""
+    if not engine.is_file():
+        return f"no engine at {engine} — run: task info ENV=<slug> (or set LOCKSTEP_TEST_ENGINE)"
+    from lockstep_train.info import from_engine
+    from lockstep_train.wire import WireError
+
+    try:
+        from_engine(str(engine), seat=0)
+    except WireError as e:
+        return (
+            f"{engine} predates the installed lockstep_train's declaration layout ({e}); "
+            "re-run task info ENV=<slug> once the release is republished, or set "
+            "LOCKSTEP_TEST_ENGINE to a current engine"
+        )
+    return None
+
+
+pytestmark = pytest.mark.skipif(_unusable(ENGINE) is not None, reason=str(_unusable(ENGINE)))
 
 
 def _vec(autoreset_mode, num_envs=1):

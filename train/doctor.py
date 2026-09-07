@@ -235,12 +235,42 @@ def check_c(required: bool) -> Check:
     return Check("C toolchain", True, required, f"wasi-sdk at {sdk}; wit-bindgen at {wb}")
 
 
+def _human(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
 def check_engine() -> Check:
+    """The keyed cache, one line per (environment, mode): its size on disk
+    and the blobs / ONNX artifacts fetched beside the engine — so a data
+    environment's tables are visibly there (or visibly not)."""
     cache = ROOT / "out" / "cache"
     engines = sorted(cache.glob("*/*/engine.wasm")) if cache.is_dir() else []
     if engines:
-        keys = ", ".join(f"{e.parent.parent.name}/{e.parent.name}" for e in engines)
-        return Check("engine cache", True, False, f"out/cache holds: {keys}")
+        lines = []
+        for e in engines:
+            d = e.parent
+            files = [p for p in d.rglob("*") if p.is_file()]
+            size = sum(p.stat().st_size for p in files)
+            data = sorted(p.name for p in (d / "data").iterdir() if p.is_file()) if (d / "data").is_dir() else []
+            arts = (
+                sorted(p.name for p in (d / "artifacts").iterdir() if p.is_file())
+                if (d / "artifacts").is_dir()
+                else []
+            )
+            extras = []
+            if data:
+                extras.append(f"data: {', '.join(data)}")
+            if arts:
+                extras.append(f"artifacts: {', '.join(arts)}")
+            if not (d / "agent-onnx.wasm").is_file():
+                extras.append("shell missing — re-run task info")
+            tail = f" ({'; '.join(extras)})" if extras else ""
+            lines.append(f"{d.parent.name}/{d.name} {_human(size)}{tail}")
+        return Check("engine cache", True, False, "out/cache holds: " + "; ".join(lines))
     return Check(
         "engine cache",
         False,

@@ -12,6 +12,9 @@ already needs). Under that prefix:
 
     <prefix>/engine.wasm        the mode's engine — what you train against
     <prefix>/agent-onnx.wasm    the generic ONNX agent shell — what you ship
+    <prefix>/<data path>        read-only blobs the engine pages through, and
+    <prefix>/<artifact path>    ONNX models it runs — pinned by digest in the
+                                platform's record of the release
 
 Endpoints come from the same variables the library reads —
 ``$LOCKSTEP_API_URL`` and ``$LOCKSTEP_CDN_URL`` — so the template and the
@@ -20,9 +23,9 @@ library can never disagree about where "the platform" is.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from lockstep_train.fetch import cdn_base
+from lockstep_train.fetch import ArtifactEntry, DataEntry, cdn_base
 from lockstep_train.fetch import resolve as resolve_release
 
 
@@ -37,6 +40,10 @@ class EnvRelease:
     modes: tuple[str, ...]
     #: CDN prefix of this mode's release directory (no trailing slash).
     prefix: str
+    #: Read-only blobs the engine reads (``lockstep:data``), as pinned.
+    data: tuple[DataEntry, ...] = ()
+    #: ONNX artifacts the engine itself runs (``lockstep:inference``), as pinned.
+    artifacts: tuple[ArtifactEntry, ...] = ()
 
     @property
     def release_url(self) -> str:
@@ -49,6 +56,9 @@ class EnvRelease:
     @property
     def agent_shell_url(self) -> str:
         return f"{self.release_url}/agent-onnx.wasm"
+
+    def blob_url(self, entry: DataEntry | ArtifactEntry) -> str:
+        return f"{self.release_url}/{entry.path}"
 
 
 def resolve(slug: str, version: str | None = None, mode: str | None = None) -> EnvRelease:
@@ -78,6 +88,8 @@ def resolve(slug: str, version: str | None = None, mode: str | None = None) -> E
         mode=release.mode,
         modes=release.modes,
         prefix=release.prefix,
+        data=release.data,
+        artifacts=release.artifacts,
     )
 
 
@@ -92,6 +104,9 @@ class PublishedEnvironment:
     #: invite key (its release names a CDN ``engine_object_key``). False means
     #: assessment-only: ``LOCKSTEP_API_KEY`` for an invited candidate.
     public: bool
+    #: Each published mode's assessment tags (``facet:value`` from the
+    #: shared vocabulary, free words last), as the catalog lists them.
+    tags: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def published() -> list[PublishedEnvironment]:
@@ -121,6 +136,11 @@ def published() -> list[PublishedEnvironment]:
                 slug=env["id"],
                 modes=tuple(key for key, _ in releases),
                 public=any(bool(rel.get("engine_object_key")) for _, rel in releases),
+                tags={
+                    m["key"]: tuple(str(t) for t in m.get("tags") or ())
+                    for m in env.get("modes", [])
+                    if m.get("release") is not None
+                },
             )
         )
     return found
@@ -167,6 +187,12 @@ def main(argv: list[str] | None = None) -> int:
         if not env.public:
             line += "    (invite key required)"
         print(line)
+        # One line per mode with its tags — what the catalog's filter rail
+        # reads; a mode with none prints nothing extra.
+        for mode in env.modes:
+            tags = env.tags.get(mode, ())
+            if tags:
+                print(f"{' ' * width}      {mode}: {', '.join(tags)}")
     return 0
 
 

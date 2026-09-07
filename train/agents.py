@@ -15,6 +15,20 @@ the engine from it, so an agent can never be run against the wrong mode::
     environment_version = "0.8.0"
     payload_schema_version = 8
 
+    [supervised]                       # only when the declaration reveals truth
+    value = "feedback"                 # the feedback window and its columns …
+    age_col = "age_ticks"
+    decision_col = "your_decision"
+    truth_col = "truth"
+    valid_col = "valid"
+    action = "decision"                # … label this action's first element
+    # or, for an environment that scores through the lagged reward instead:
+    # reward_lag_ticks = 40
+
+The ``[supervised]`` block is written from the declaration (a value whose
+columns carry the documented feedback names, or ``meta.reward_lag_ticks``)
+and read by ``task train RECIPE=supervised`` — see ``train/core/supervised.py``.
+
 ``AGENT=`` may be omitted when exactly one agent exists — the common case —
 and every error here says exactly what to type instead.
 """
@@ -22,7 +36,7 @@ and every error here says exactly what to type instead.
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 AGENTS_ROOT = Path("agents")
@@ -40,6 +54,9 @@ class AgentConfig:
     lang: str
     environment_version: str
     payload_schema_version: int
+    #: The ``[supervised]`` block (label source for the supervised recipe),
+    #: or ``None`` when the declaration reveals no truth to learn from.
+    supervised: dict | None = field(default=None, compare=True)
 
     @property
     def dir(self) -> Path:
@@ -53,6 +70,33 @@ class AgentConfig:
     @property
     def bundle_dir(self) -> Path:
         return self.out_dir / "bundle"
+
+
+def _toml_scalar(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def supervised_toml(block: dict) -> str:
+    """The ``[supervised]`` table: where the truth of a decision shows up,
+    as the declaration names it."""
+    lines = [
+        "",
+        "# The supervised recipe's label source (`task train RECIPE=supervised`):",
+        "# generated from the declaration — a feedback window whose columns say",
+        "# how old each resolved decision is, what you decided and what was true",
+        "# (or the lag after which the reward scores a decision). `action` is",
+        "# the declared action the truth trains, element 0.",
+        "[supervised]",
+    ]
+    for k, v in block.items():
+        if v is None:
+            continue
+        lines.append(f"{k} = {_toml_scalar(v)}")
+    return "\n".join(lines) + "\n"
 
 
 def agent_toml_text(cfg: AgentConfig) -> str:
@@ -75,6 +119,7 @@ def agent_toml_text(cfg: AgentConfig) -> str:
         "[release]\n"
         f'environment_version = "{cfg.environment_version}"\n'
         f"payload_schema_version = {cfg.payload_schema_version}\n"
+        + (supervised_toml(cfg.supervised) if cfg.supervised else "")
     )
 
 
@@ -106,6 +151,7 @@ def load_agent(name: str, root: Path = AGENTS_ROOT) -> AgentConfig:
         lang=lang,
         environment_version=release.get("environment_version", ""),
         payload_schema_version=int(release.get("payload_schema_version", 0)),
+        supervised=dict(raw["supervised"]) if raw.get("supervised") else None,
     )
 
 
@@ -133,6 +179,40 @@ def resolve_agent(name: str | None, root: Path = AGENTS_ROOT) -> AgentConfig:
         )
     names = ", ".join(a.name for a in agents)
     raise SystemExit(f"several agents exist ({names}) — say which: AGENT=<name>")
+
+
+def import_agent_module(cfg: AgentConfig, name: str):
+    """Import ``agents/<name>/<name>.py`` (``policy``, ``model``,
+    ``interface``) as the agent's own top-level module: the agent dir goes
+    on ``sys.path`` for the import (names like ``my-bot`` are not
+    importable as packages) and any earlier agent's module of the same
+    name is dropped first, so two agents never share one."""
+    import importlib
+    import sys
+
+    for mod in [m for m in sys.modules if m == name or m.startswith(name + ".")]:
+        del sys.modules[mod]
+    sys.path.insert(0, str(cfg.dir.resolve()))
+    try:
+        importlib.invalidate_caches()
+        return importlib.import_module(name)
+    finally:
+        sys.path.pop(0)
+
+
+def policy_builder(cfg: AgentConfig):
+    """The agent's network: ``model.build_policy`` from its ``model.py``
+    when it has one (scaffolded by ``task create-agent``), else the stock
+    :class:`train.core.policy.Policy` — one flat stream per value."""
+    from .core.policy import Policy
+
+    if (cfg.dir / "model.py").is_file():
+        module = import_agent_module(cfg, "model")
+        build = getattr(module, "build_policy", None)
+        if build is None:
+            raise SystemExit(f"{cfg.dir / 'model.py'} defines no build_policy(observation_space, action_space)")
+        return build
+    return Policy
 
 
 def _main() -> None:
