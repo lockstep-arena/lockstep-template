@@ -1,10 +1,10 @@
 # The Lockstep wire — version 1
 
 This is the **normative spec** of the agent-facing payload every Lockstep
-environment speaks. The Rust module `src/wire.rs` (`lockstep_interface::wire`)
-is the reference implementation; `lockstep-train` (Python) is a second,
-conforming decoder; `tests/fixtures/wire/*.bin` + `*.json` are the golden
-encodings both are tested against.
+environment speaks. `reference/rust-wire/src/wire.rs` is the reference
+reader (`reference/c-wire/wire.c` is its C99 twin); `lockstep-train` (Python)
+is another conforming decoder; `reference/rust-wire/tests/fixtures/*.bin` +
+`*.json` are the golden encodings all of them are tested against.
 
 ## The mental model
 
@@ -144,7 +144,6 @@ each environment.
 | the template scaffolder (`interface.{py,rs,h}`, `model.py`) | ✓ | ✓ | ✓ | ✓ | slices + columns → constants; docs → comments | ✓ |
 | `task info`, `lockstep_train.info`, the Interface page | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ ("how you are scored") |
 | the hiring report, compare, the candidate's result | | | | | | ✓ |
-| admin readiness | | | | | ✓ (`DocGap`) | ✓ (coverage) |
 
 ## Encoding rules
 
@@ -177,7 +176,7 @@ SeatInit   : magic "LSTI" | version u32 = 1 | seat u32
            | n_act u32 | ValueSpec[n_act]
            | n_meta u32 | { key str, value str }[n_meta]
            | goal str | reward str | ends str
-           | n_metrics u32 | MetricSpec[n_metrics]      -- tail section (2026-09)
+           | n_metrics u32 | MetricSpec[n_metrics]      -- tail section; absent → metrics = []
 
 View       : magic "LSTV" | tick u32 | reward f32 | done u8 | pad u8[3]
            | n_obs u32 | { len u32 | bytes[len] }[n_obs]
@@ -275,7 +274,7 @@ decoding. The documented keys:
 | `control_hz` | the control rate | `task info`, budgets |
 | `episode_ticks` | the nominal episode length | `task info`, budgets |
 | `reward_lag_ticks` | how many ticks after a decision its truth reaches `reward` — a number, or a range like `60-150` | `task info`, the supervised recipe's documentation |
-| `tags` | comma-separated `facet:value` assessment tags from the shared vocabulary (`lockstep_interface::tags`); free words without a colon are display-only | the platform seeds the mode's tags from it on first release |
+| `tags` | comma-separated `facet:value` assessment tags from the platform's shared vocabulary; free words without a colon are display-only | the platform seeds the mode's tags from it on first release |
 
 The three trailing strings are the seat's **brief**, per seat by construction
 so an adversarial second seat can state its own goal:
@@ -290,9 +289,9 @@ Then the tail: the declared metrics.
 
 The platform captures the decoded seat-0 `SeatInit` at release time as the
 mode's `declaration_json` (the same JSON shape `serde` gives
-`wire::SeatInit`; see `tests/fixtures/wire/seat_init.json`). The Interface
-page, the admin readiness check, the hiring report and `lockstep_train.info`
-all render from that capture.
+`wire::SeatInit`; see `reference/rust-wire/tests/fixtures/seat_init.json`).
+The Interface page, the hiring report and `lockstep_train.info` all render
+from that capture.
 
 ### `View`
 
@@ -410,9 +409,8 @@ SeatInit::new(seat, obs, actions)
 brief paragraph, an observation, action, slice, column or metric with no
 `doc`, and, for values that declare slices, any elements no slice covers, any
 two slices that overlap, and any slice that runs past its value. Environment
-test suites assert it is empty for seat 0; the platform's admin readiness
-check renders the same list for the captured declaration. A value with no
-slices or columns (an image plane) is explained by its `doc` alone.
+test suites assert it is empty for seat 0. A value with no slices or columns
+(an image plane) is explained by its `doc` alone.
 
 `with_slices(&[(name, len)])` still exists for the undocumented case; every
 slice it builds is reported by the audit.
@@ -484,7 +482,7 @@ Where every byte-stream and contract around a match is defined:
 
 | Surface | What it is | Documented in |
 |---|---|---|
-| `seat-init` / `view` / `input` payloads | The agent-facing wire — this document | here; reference impl `src/wire.rs` |
+| `seat-init` / `view` / `input` payloads | The agent-facing wire — this document | here; readers in `reference/rust-wire` and `reference/c-wire` |
 | `seed` payload | Host-drawn randomness handed to `engine.init` as data; opaque, environment-folded | `wit/engine-v0.2/engine.wit` |
 | archive frames (`frame` payload) | The omniscient per-tick record, the environment's OWN format, read only by its player | `wit/engine-v0.2/engine.wit`; each environment's player |
 | archive container | `SessionArchive` header/frames/trailer (postcard), environment-agnostic | `src/archive.rs` |
@@ -495,8 +493,9 @@ Where every byte-stream and contract around a match is defined:
 
 ## Golden fixtures
 
-`tests/fixtures/wire/{seat_init,view,input}.bin` are the exact encodings of
-the canonical messages built in `tests/wire_goldens.rs`; the `.json` twins
+`reference/rust-wire/tests/fixtures/{seat_init,view,input}.bin` are the exact
+encodings of the canonical messages built in
+`reference/rust-wire/tests/wire_goldens.rs`; the `.json` twins
 are their decoded forms (`seat_init.json` is the `serde` JSON of
 `wire::SeatInit`; `view.json`/`input.json` list each value's name, dtype and
 decoded elements). The seat-init golden deliberately leaves one slice and one
@@ -516,9 +515,6 @@ documentation channel (`doc`, `unit`, the brief) was added to version 1 **in
 place** (2026-08-26): the platform, every environment and every decoder
 republished in the same change, so no `SeatInit` written under the old
 layout survived to be misread, and every mode's `payload-schema-version`
-bumped with it. The expansion to data assessments (2026-09) took the same
-route once more for the length-prefixed `ValueSpec` region, `columns`, the
-`MetricSpec` tail and the assessment-tag vocabulary: one cutover republished
-every engine and wiped every agent, and the region and tail rules mean it is
-the last time an addition needs it. Details live in the git log and the
-README's *in-place exceptions on record*.
+bumped with it. The length-prefixed `ValueSpec` region, `columns`, the
+`MetricSpec` tail and the assessment-tag vocabulary were added the same way;
+the region rule and the tail rule mean an addition no longer needs a cutover.
