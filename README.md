@@ -481,7 +481,7 @@ free-form metadata, the seat's brief — goal, reward, what ends an episode
 — and the metrics the session will report, each with a unit and a
 direction. Every tick after that is positional, near-raw blobs the
 declaration explains. Little-endian, no codegen — the spec fits on a page
-([docs/wire.md](docs/wire.md) — vendored here from the platform's
+([docs/wire.md](docs/wire.md) — copied verbatim from the platform's
 interface repo at every release), and `reference/rust-wire` +
 `reference/c-wire` re-implement it from scratch to prove the point. The
 generic ONNX shell, the Python env, `task info`, the environment's
