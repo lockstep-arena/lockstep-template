@@ -40,8 +40,8 @@ tasks:
               "{{.VENV}}/bin/pip" install --upgrade pip
               "{{.VENV}}/bin/pip" install -r requirements.txt
               # The one Lockstep dependency. LOCKSTEP_TRAIN_SPEC overrides the
-              # PyPI spec for local development against a checkout/wheel — e.g.
-              #   task setup LOCKSTEP_TRAIN_SPEC="-e ../LOCKSTEP-PLATFORM/packages/mixed/lockstep-train[pettingzoo]"
+              # PyPI spec with a local checkout or wheel — e.g.
+              #   task setup LOCKSTEP_TRAIN_SPEC="-e /path/to/lockstep-train[pettingzoo]"
               "{{.VENV}}/bin/pip" install {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train[pettingzoo]>=0.6.0\""}}
               ;;
             rust|c)
