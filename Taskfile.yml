@@ -235,7 +235,16 @@ tasks:
         fi
 
   test:
-    desc: "Run the template's own tests: pytest (hermetic always; engine-backed when a cached engine exists or LOCKSTEP_TEST_ENGINE is set), the Rust wire reference vs the spec goldens, and — when a C compiler is present — the C wire reference vs the same goldens."
+    desc: "Run the template's own tests: pytest (hermetic always; engine-backed when a cached engine exists), the Rust wire reference vs the spec goldens, and — when a C compiler is present — the C wire reference vs the same goldens."
+    summary: |
+      Run the template's own tests.
+
+      pytest runs the hermetic tests always and the engine-backed ones when
+      an engine is available: any engine in the keyed cache (out/cache/ —
+      every task that needs one fills it), or LOCKSTEP_TEST_ENGINE=<path>
+      to point them at a specific engine (see tests/test_vec_env_semantics.py).
+      Then the Rust wire reference vs the spec goldens, and — when a C
+      compiler is present — the C wire reference vs the same goldens.
     cmds:
       - '"{{.VENV}}/bin/pip" install --quiet pytest'
       - '"{{.PY}}" -m pytest tests -q'
