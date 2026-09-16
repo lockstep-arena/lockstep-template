@@ -81,7 +81,7 @@ the generic agent shell as WASM from the release). The
 (or `LANGS=c`) away.
 
 For `task upload` only: an API key. Copy `.env.example` to `.env` and fill in
-`LOCKSTEP_API_KEY` (create a key from your account settings at lockstep.it).
+`LOCKSTEP_API_KEY` (create a key on the Authorization page at lockstep.it).
 
 ## Commands
 
@@ -96,7 +96,7 @@ For `task upload` only: an API key. Copy `.env.example` to `.env` and fill in
 | `task train AGENT= RECIPE= STEPS= NUM_ENVS= RESUME=1 PARALLEL=1 SEEDS= EPOCHS=` | Train → ONNX → parity check → stage `agents/<name>/out/bundle` (python agents). `RECIPE=ppo` (default) learns from the reward; `RECIPE=supervised` fits the truth the environment reveals. The network is the agent's own `model.py` either way. |
 | `task build AGENT=` | Build the bundle without training: python exports YOUR `policy.py`; rust/c compile the wasm component. |
 | `task match AGENT=` | A real local match through the CLI, every seat your agent, archived to `out/archive.bin`. |
-| `task upload AGENT= NAME= AGENT_ID=` | Upload the agent's bundle to compete (or seal it for an assessment). |
+| `task upload AGENT= NAME= AGENT_ID= APPROVE=1` | Upload the agent's bundle to compete. On an assessment the first upload that verifies is your submission, and it is final; `APPROVE=1` skips the confirmation prompt. |
 | `task test` | The template's own tests (hermetic + engine-backed + the wire references vs the spec goldens). |
 
 <details>
@@ -355,11 +355,11 @@ lockstep agent validate --bundle agents/my-bot/out/bundle
 Some companies use Lockstep environments as hands-on hiring assessments. If
 you received an invite link, the flow is this exact repo: practice locally
 as much as you like (`task build` / `task train` / `task match` on random
-scenarios, on the same engine that scores you), `task upload` your best
-agent, then **seal** it from your invite page. The invite page lists your
-verified agents — the upload you just made is what you seal. Sealing is
-final: the platform runs your bundle once over the role's frozen scenario
-suite and the score is what it is.
+scenarios, on the same engine that scores you), then `task upload` your
+best agent. **Upload is submit**: the first upload that verifies is your
+submission and it is final — the platform runs that bundle once over the
+role's frozen scenario suite, the score is what it is, and later uploads
+are refused. Run `task match` until you are happy before you upload.
 
 What the employer receives, so there are no surprises:
 
@@ -378,7 +378,7 @@ What the employer receives, so there are no surprises:
 
 Two invite options an employer may have switched on: **hand-written policy
 only** (no ONNX artifact — `task create-agent LANG=rust` or `LANG=c`; the
-Python path always ships an ONNX policy and will be refused at seal), and a
+Python path always ships an ONNX policy and will be refused at upload), and a
 **follow-up round** — a second, 48-hour invite on fresh scenarios with one
 stated change, which you take with the same workflow.
 
