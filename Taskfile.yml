@@ -198,12 +198,12 @@ tasks:
         echo "Watch it: drop out/archive.bin on https://lockstep.it/replay"
 
   upload:
-    desc: "Upload an agent's bundle to compete (or to seal for an assessment), plus its source as an employer-visible archive. Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision. SOURCE=0 to upload the bundle alone."
+    desc: "Upload an agent's bundle to compete — on an assessment this IS your submission: the first upload that verifies is final — plus its source as an employer-visible archive. Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision. SOURCE=0 to upload the bundle alone. APPROVE=1 to skip the CLI's confirmation prompt."
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
       - sh: test -n "${LOCKSTEP_API_KEY:-}"
-        msg: "LOCKSTEP_API_KEY not set — copy .env.example to .env and fill it in"
+        msg: "LOCKSTEP_API_KEY not set — cp .env.example .env, then paste a key from the Authorization page at https://lockstep.it into LOCKSTEP_API_KEY="
     cmds:
       - |
         set -e
@@ -227,11 +227,22 @@ tasks:
             echo "upload: this lockstep CLI predates --source; uploading the bundle without the source archive (update: curl -fsSL https://dl.lockstep.it/install.sh | sh)" >&2
           fi
         fi
+        # APPROVE=1 skips the CLI's confirmation prompt (--approve, CLI
+        # 0.1.9+). Same guard: only when the installed CLI knows the flag;
+        # an older CLI still prompts and says so.
+        APPROVE_ARGS=""
+        if [ -n "{{.APPROVE}}" ] && [ "{{.APPROVE}}" != "0" ]; then
+          if lockstep agent upload --help 2>/dev/null | grep -q -- '--approve'; then
+            APPROVE_ARGS="--approve"
+          else
+            echo "upload: this lockstep CLI predates --approve; it will ask for confirmation (update: curl -fsSL https://dl.lockstep.it/install.sh | sh)" >&2
+          fi
+        fi
         if [ -n "{{.AGENT_ID}}" ]; then
-          lockstep agent upload --bundle "$BUNDLE" --agent-id "{{.AGENT_ID}}" $SOURCE_ARGS
+          lockstep agent upload --bundle "$BUNDLE" --agent-id "{{.AGENT_ID}}" $SOURCE_ARGS $APPROVE_ARGS
         else
           lockstep agent upload --bundle "$BUNDLE" \
-            --display-name "$DISPLAY_NAME" --environment-id "$AGENT_ENV" $SOURCE_ARGS
+            --display-name "$DISPLAY_NAME" --environment-id "$AGENT_ENV" $SOURCE_ARGS $APPROVE_ARGS
         fi
 
   test:
