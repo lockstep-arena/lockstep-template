@@ -8,7 +8,10 @@ gymnasium>=1.0
 # once, on any multi-seat environment).
 pettingzoo>=1.24
 numpy>=1.26
-torch>=2.4
+# <2.14: torch 2.14's exporter emits `noop_with_empty_axes` on ReduceMean even at
+# opset 17, which onnxruntime refuses to load ("Unrecognized attribute"). Lift the
+# cap once the export path moves to opset 18 end to end.
+torch>=2.4,<2.14
 onnx>=1.16
 onnxruntime>=1.18
 # torch.onnx.export's exporter imports this at export time.
