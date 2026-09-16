@@ -1,10 +1,14 @@
 # The Lockstep wire — version 1
 
 This is the **normative spec** of the agent-facing payload every Lockstep
-environment speaks. `reference/rust-wire/src/wire.rs` is the reference
-reader (`reference/c-wire/wire.c` is its C99 twin); `lockstep-train` (Python)
-is another conforming decoder; `reference/rust-wire/tests/fixtures/*.bin` +
-`*.json` are the golden encodings all of them are tested against.
+environment speaks. The reference reader is the Rust module `wire.rs`
+(`lockstep_interface::wire` in the interface crate; the template ships the same
+reader verbatim as `reference/rust-wire`, with a C99 twin in
+`reference/c-wire`); `lockstep-train` (Python) is another conforming decoder;
+the wire goldens — `{seat_init,view,input}.bin` + `.json`, under
+`tests/fixtures/wire/` in the interface crate and
+`reference/rust-wire/tests/fixtures/` in the template — are the encodings all
+of them are tested against.
 
 ## The mental model
 
@@ -289,7 +293,7 @@ Then the tail: the declared metrics.
 
 The platform captures the decoded seat-0 `SeatInit` at release time as the
 mode's `declaration_json` (the same JSON shape `serde` gives
-`wire::SeatInit`; see `reference/rust-wire/tests/fixtures/seat_init.json`).
+`wire::SeatInit`; see the `seat_init.json` wire golden).
 The Interface page, the hiring report and `lockstep_train.info` all render
 from that capture.
 
@@ -482,7 +486,7 @@ Where every byte-stream and contract around a match is defined:
 
 | Surface | What it is | Documented in |
 |---|---|---|
-| `seat-init` / `view` / `input` payloads | The agent-facing wire — this document | here; readers in `reference/rust-wire` and `reference/c-wire` |
+| `seat-init` / `view` / `input` payloads | The agent-facing wire — this document | here; the reference readers (`wire.rs`, and the template's `reference/rust-wire` + `reference/c-wire`) |
 | `seed` payload | Host-drawn randomness handed to `engine.init` as data; opaque, environment-folded | `wit/engine-v0.2/engine.wit` |
 | archive frames (`frame` payload) | The omniscient per-tick record, the environment's OWN format, read only by its player | `wit/engine-v0.2/engine.wit`; each environment's player |
 | archive container | `SessionArchive` header/frames/trailer (postcard), environment-agnostic | `src/archive.rs` |
@@ -493,9 +497,8 @@ Where every byte-stream and contract around a match is defined:
 
 ## Golden fixtures
 
-`reference/rust-wire/tests/fixtures/{seat_init,view,input}.bin` are the exact
-encodings of the canonical messages built in
-`reference/rust-wire/tests/wire_goldens.rs`; the `.json` twins
+The wire goldens `{seat_init,view,input}.bin` are the exact encodings of the
+canonical messages built in the reader's `wire_goldens.rs` test; the `.json` twins
 are their decoded forms (`seat_init.json` is the `serde` JSON of
 `wire::SeatInit`; `view.json`/`input.json` list each value's name, dtype and
 decoded elements). The seat-init golden deliberately leaves one slice and one
