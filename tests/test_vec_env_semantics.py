@@ -27,14 +27,6 @@ import pytest
 
 from train.core.train import make_env_factory, make_vec_env
 
-def _default_engine() -> str:
-    cached = sorted(Path("out/cache").glob("*/*/engine.wasm"))
-    return str(cached[0]) if cached else "out/cache/<env>/<mode>/engine.wasm"
-
-
-ENGINE = Path(os.environ.get("LOCKSTEP_TEST_ENGINE") or _default_engine())
-
-
 def _unusable(engine: Path) -> str | None:
     """Why this engine cannot back the tests, or ``None`` when it can: it is
     missing, or it was published before the installed ``lockstep_train``'s
@@ -55,6 +47,19 @@ def _unusable(engine: Path) -> str | None:
         )
     return None
 
+
+def _default_engine() -> str:
+    """The first cached engine that still decodes. One stale entry in the
+    cache (an environment republished since it was fetched) must not hide a
+    perfectly good one behind it and skip the whole file."""
+    cached = sorted(Path("out/cache").glob("*/*/engine.wasm"))
+    for engine in cached:
+        if _unusable(engine) is None:
+            return str(engine)
+    return str(cached[0]) if cached else "out/cache/<env>/<mode>/engine.wasm"
+
+
+ENGINE = Path(os.environ.get("LOCKSTEP_TEST_ENGINE") or _default_engine())
 
 pytestmark = pytest.mark.skipif(_unusable(ENGINE) is not None, reason=str(_unusable(ENGINE)))
 
