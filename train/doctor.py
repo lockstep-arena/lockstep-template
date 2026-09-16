@@ -158,7 +158,7 @@ def check_api_key() -> Check:
         False,
         False,
         "not set — everything except `task upload` works without it",
-        "cp .env.example .env, then paste a key from your account settings at https://lockstep.it into LOCKSTEP_API_KEY=",
+        "cp .env.example .env, then paste a key from the Authorization page at https://lockstep.it into LOCKSTEP_API_KEY=",
     )
 
 

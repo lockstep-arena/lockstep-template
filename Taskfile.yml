@@ -40,8 +40,8 @@ tasks:
               "{{.VENV}}/bin/pip" install --upgrade pip
               "{{.VENV}}/bin/pip" install -r requirements.txt
               # The one Lockstep dependency. LOCKSTEP_TRAIN_SPEC overrides the
-              # PyPI spec for local development against a checkout/wheel — e.g.
-              #   task setup LOCKSTEP_TRAIN_SPEC="-e ../LOCKSTEP-PLATFORM/packages/mixed/lockstep-train[pettingzoo]"
+              # PyPI spec with a local checkout or wheel — e.g.
+              #   task setup LOCKSTEP_TRAIN_SPEC="-e /path/to/lockstep-train[pettingzoo]"
               "{{.VENV}}/bin/pip" install {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train[pettingzoo]>=0.6.0\""}}
               ;;
             rust|c)
@@ -198,12 +198,12 @@ tasks:
         echo "Watch it: drop out/archive.bin on https://lockstep.it/replay"
 
   upload:
-    desc: "Upload an agent's bundle to compete (or to seal for an assessment), plus its source as an employer-visible archive. Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision. SOURCE=0 to upload the bundle alone."
+    desc: "Upload an agent's bundle to compete — on an assessment this IS your submission: the first upload that verifies is final — plus its source as an employer-visible archive. Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision. SOURCE=0 to upload the bundle alone. APPROVE=1 to skip the CLI's confirmation prompt."
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
       - sh: test -n "${LOCKSTEP_API_KEY:-}"
-        msg: "LOCKSTEP_API_KEY not set — copy .env.example to .env and fill it in"
+        msg: "LOCKSTEP_API_KEY not set — cp .env.example .env, then paste a key from the Authorization page at https://lockstep.it into LOCKSTEP_API_KEY="
     cmds:
       - |
         set -e
@@ -227,15 +227,35 @@ tasks:
             echo "upload: this lockstep CLI predates --source; uploading the bundle without the source archive (update: curl -fsSL https://dl.lockstep.it/install.sh | sh)" >&2
           fi
         fi
+        # APPROVE=1 skips the CLI's confirmation prompt (--approve, CLI
+        # 0.1.9+). Same guard: only when the installed CLI knows the flag;
+        # an older CLI still prompts and says so.
+        APPROVE_ARGS=""
+        if [ -n "{{.APPROVE}}" ] && [ "{{.APPROVE}}" != "0" ]; then
+          if lockstep agent upload --help 2>/dev/null | grep -q -- '--approve'; then
+            APPROVE_ARGS="--approve"
+          else
+            echo "upload: this lockstep CLI predates --approve; it will ask for confirmation (update: curl -fsSL https://dl.lockstep.it/install.sh | sh)" >&2
+          fi
+        fi
         if [ -n "{{.AGENT_ID}}" ]; then
-          lockstep agent upload --bundle "$BUNDLE" --agent-id "{{.AGENT_ID}}" $SOURCE_ARGS
+          lockstep agent upload --bundle "$BUNDLE" --agent-id "{{.AGENT_ID}}" $SOURCE_ARGS $APPROVE_ARGS
         else
           lockstep agent upload --bundle "$BUNDLE" \
-            --display-name "$DISPLAY_NAME" --environment-id "$AGENT_ENV" $SOURCE_ARGS
+            --display-name "$DISPLAY_NAME" --environment-id "$AGENT_ENV" $SOURCE_ARGS $APPROVE_ARGS
         fi
 
   test:
-    desc: "Run the template's own tests: pytest (hermetic always; engine-backed when a cached engine exists or LOCKSTEP_TEST_ENGINE is set), the Rust wire reference vs the spec goldens, and — when a C compiler is present — the C wire reference vs the same goldens."
+    desc: "Run the template's own tests: pytest (hermetic always; engine-backed when a cached engine exists), the Rust wire reference vs the spec goldens, and — when a C compiler is present — the C wire reference vs the same goldens."
+    summary: |
+      Run the template's own tests.
+
+      pytest runs the hermetic tests always and the engine-backed ones when
+      an engine is available: any engine in the keyed cache (out/cache/ —
+      every task that needs one fills it), or LOCKSTEP_TEST_ENGINE=<path>
+      to point them at a specific engine (see tests/test_vec_env_semantics.py).
+      Then the Rust wire reference vs the spec goldens, and — when a C
+      compiler is present — the C wire reference vs the same goldens.
     cmds:
       - '"{{.VENV}}/bin/pip" install --quiet pytest'
       - '"{{.PY}}" -m pytest tests -q'

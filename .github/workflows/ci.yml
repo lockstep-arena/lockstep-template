@@ -41,7 +41,7 @@ jobs:
       - name: Install the training stack
         run: |
           pip install -r requirements.txt
-          pip install "lockstep-train[pettingzoo]>=0.5.0" pytest
+          pip install "lockstep-train[pettingzoo]>=0.6.0" pytest
 
       - name: Pick an environment from the live platform (first publicly published slug)
         # $GITHUB_ENV works under bash on every matrix OS, Windows included.
