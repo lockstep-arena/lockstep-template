@@ -23,6 +23,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -281,31 +282,47 @@ def check_engine() -> Check:
     )
 
 
-def run() -> list[Check]:
+#: The checks, in the order they are reported. Names are listed up front so
+#: the report can be printed one line at a time — the column width is known
+#: before the slow checks (the venv imports torch) have run.
+def checks() -> list[tuple[str, Callable[[], Check]]]:
     langs = _agent_langs()
     return [
-        check_python(),
-        check_task(),
-        check_cli(),
-        check_venv(),
-        check_api_key(),
-        check_rust(required="rust" in langs),
-        check_c(required="c" in langs),
-        check_engine(),
+        ("Python", check_python),
+        ("Task", check_task),
+        ("lockstep CLI", check_cli),
+        ("venv", check_venv),
+        ("LOCKSTEP_API_KEY", check_api_key),
+        ("Rust toolchain", lambda: check_rust(required="rust" in langs)),
+        ("C toolchain", lambda: check_c(required="c" in langs)),
+        ("engine cache", check_engine),
     ]
 
 
-def render(checks: list[Check]) -> str:
-    lines = ["lockstep template doctor", ""]
-    width = max(len(c.name) for c in checks)
-    for c in checks:
-        mark = "✓" if c.ok else ("✗" if c.required else "·")
-        lines.append(f"  {mark} {c.name:<{width}}  {c.detail}")
-        if not c.ok and c.fix:
-            lines.append(f"    fix → {c.fix}")
+def run(progress: Callable[[Check], None] | None = None) -> list[Check]:
+    """Run every check; `progress` is called with each one as it lands."""
+    done: list[Check] = []
+    for _, fn in checks():
+        c = fn()
+        done.append(c)
+        if progress is not None:
+            progress(c)
+    return done
+
+
+def render_line(c: Check, width: int) -> str:
+    """One check as the report prints it (plus its fix line when it failed)."""
+    mark = "✓" if c.ok else ("✗" if c.required else "·")
+    line = f"  {mark} {c.name:<{width}}  {c.detail}"
+    if not c.ok and c.fix:
+        line += f"\n    fix → {c.fix}"
+    return line
+
+
+def render_summary(checks: list[Check]) -> str:
     missing = [c for c in checks if not c.ok and c.required]
     optional = [c for c in checks if not c.ok and not c.required]
-    lines.append("")
+    lines = [""]
     if missing:
         lines.append(f"{len(missing)} required item(s) missing — fix the ✗ lines above, then run `task doctor` again.")
     else:
@@ -315,16 +332,34 @@ def render(checks: list[Check]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render(checks: list[Check]) -> str:
+    """The whole report at once (the streaming path prints the same lines)."""
+    width = max(len(c.name) for c in checks)
+    body = "\n".join(render_line(c, width) for c in checks)
+    return f"{HEADER}\n\n{body}\n{render_summary(checks)}"
+
+
+HEADER = "lockstep template doctor"
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--json", action="store_true", help="emit the report as JSON")
     args = ap.parse_args(argv)
-    checks = run()
     if args.json:
-        print(json.dumps([asdict(c) for c in checks], indent=2))
+        # Progress goes to stderr so stdout stays a single JSON document.
+        print("doctor: running checks…", file=sys.stderr, flush=True)
+        report = run()
+        print(json.dumps([asdict(c) for c in report], indent=2))
     else:
-        sys.stdout.write(render(checks))
-    return 1 if any(not c.ok and c.required for c in checks) else 0
+        # Say something before the first slow check (the venv one imports
+        # the training stack, which can take several seconds cold), and
+        # print every result the moment it lands rather than all at the end.
+        width = max(len(name) for name, _ in checks())
+        print(f"{HEADER}\nrunning checks… (the venv check imports the training stack; give it a moment)\n", flush=True)
+        report = run(lambda c: print(render_line(c, width), flush=True))
+        sys.stdout.write(render_summary(report))
+    return 1 if any(not c.ok and c.required for c in report) else 0
 
 
 if __name__ == "__main__":

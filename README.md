@@ -399,9 +399,8 @@ task create-agent NAME=picky ENV=panda-pick    # scaffold from ITS declaration
 task train AGENT=picky                         # the network is built from the same declaration
 ```
 
-`train/core/discovery.py` resolves the release through the platform API
-(`LOCKSTEP_API_URL`; artifacts then come from the CDN, `LOCKSTEP_CDN_URL`);
-the engine's own declaration does the rest.
+`train/core/discovery.py` resolves the release through the platform API, the
+artifacts come from the CDN, and the engine's own declaration does the rest.
 
 </details>
 

@@ -16,9 +16,9 @@ already needs). Under that prefix:
     <prefix>/<artifact path>    ONNX models it runs — pinned by digest in the
                                 platform's record of the release
 
-Endpoints come from the same variables the library reads —
-``$LOCKSTEP_API_URL`` and ``$LOCKSTEP_CDN_URL`` — so the template and the
-library can never disagree about where "the platform" is.
+The platform's endpoints are the library's (``lockstep_train.fetch``), so
+the template and the library can never disagree about where "the platform"
+is.
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ def published() -> list[PublishedEnvironment]:
     named in this repo — not as a default, not in CI. ``task envs`` prints
     it; ``task create-agent ENV=<slug>`` takes one of these slugs.
     """
-    # Same helper `resolve` uses — it already handles LOCKSTEP_API_URL,
+    # Same helper `resolve` uses — it already handles the endpoint,
     # LOCKSTEP_API_KEY and the User-Agent.
     from lockstep_train.fetch import _api_post
 

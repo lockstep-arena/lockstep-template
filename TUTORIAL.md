@@ -14,6 +14,7 @@ task doctor
 
 ```
 lockstep template doctor
+running checks… (the venv check imports the training stack; give it a moment)
 
   ✓ Python            3.14.6 at /opt/homebrew/opt/python@3.14/bin/python3.14
   ✓ Task              3.53.1 at /opt/homebrew/bin/task
