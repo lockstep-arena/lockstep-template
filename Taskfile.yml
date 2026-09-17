@@ -12,7 +12,7 @@
 # and the engine wasm's own declaration describes the whole interface.
 # No environment is named here, not even as a default: `task envs` asks the
 # platform what is published, and ENV=<slug> is always yours to pass.
-# Browse the catalog: https://lockstep.it/exhibitions
+# Browse the catalog: https://exhibitions.lockstep.it
 version: "3"
 
 # Print what the task SAYS, not the shell line that says it. This is a
@@ -109,7 +109,7 @@ tasks:
       - python3 -m train.doctor
 
   quickstart:
-    desc: "Zero decisions: setup → create-agent (python) → build → a real local match → hand you the archive to drop on lockstep.it/replay. ENV="
+    desc: "Zero decisions: setup → create-agent (python) → build → a real local match → hand you the archive to drop on exhibitions.lockstep.it/replay. ENV="
     vars:
       NAME: '{{.NAME | default "my-bot"}}'
     preconditions:
@@ -125,7 +125,7 @@ tasks:
         vars: { AGENT: "{{.NAME}}" }
       - 'echo ""'
       - 'echo "quickstart: done — out/archive.bin is a real {{.ENV}} match with agents/{{.NAME}} in every seat."'
-      - 'echo "Watch it:   drop out/archive.bin on https://lockstep.it/replay"'
+      - 'echo "Watch it:   drop out/archive.bin on https://exhibitions.lockstep.it/replay"'
       - 'echo "Read it:    task info ENV={{.ENV}}    (the brief and the wire, in this terminal)"'
       - 'echo "Make it yours: edit agents/{{.NAME}}/policy.py, then task build AGENT={{.NAME}}"'
       - 'echo "Train it:      task train AGENT={{.NAME}}  then task match, then task upload"'
@@ -205,7 +205,7 @@ tasks:
           lockstep archive report out/archive.bin
         fi
         echo ""
-        echo "Watch it: drop out/archive.bin on https://lockstep.it/replay"
+        echo "Watch it: drop out/archive.bin on https://exhibitions.lockstep.it/replay"
         echo "Read it again any time: task report   (ARCHIVE=<path> for another archive)"
 
   report:

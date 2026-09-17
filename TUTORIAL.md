@@ -59,7 +59,7 @@ runs `setup` → `create-agent` → `build` → `match` back to back and ends wi
 
 ```
 quickstart: done — out/archive.bin is a real go1-beacon match with agents/my-bot in every seat.
-Watch it:   drop out/archive.bin on https://lockstep.it/replay
+Watch it:   drop out/archive.bin on https://exhibitions.lockstep.it/replay
 Read it:    task info ENV=go1-beacon    (the brief and the wire, in this terminal)
 Make it yours: edit agents/my-bot/policy.py, then task build AGENT=my-bot
 Train it:      task train AGENT=my-bot  then task match, then task upload
@@ -173,7 +173,7 @@ carries its code table right there); a `HOW YOU ARE SCORED` block names
 every metric the report will show, and a `TAGS` line the mode's
 assessment tags. The
 same declaration renders as the environment's
-[Interface tab](https://lockstep.it/exhibitions/environment/go1-beacon/interface);
+[Interface tab](https://exhibitions.lockstep.it/environment/go1-beacon/interface);
 `python -m lockstep_train.info --env go1-beacon` prints it without
 downloading anything. The first `task info` also fetched the release into
 the keyed cache (`out/cache/go1-beacon/default/`) — nothing else will ever
@@ -280,7 +280,7 @@ task match AGENT=walker
 match finished: 13 frames, final tick 12, rankings [0], winner None — archive out/archive.bin (6437 bytes)
         metrics: [ score 4.87, success 0, reached 0, max-tilt 0.196, energy 349, pushes 2, … ]
 ✓ match archived → out/archive.bin
-Watch it: drop out/archive.bin on https://lockstep.it/replay
+Watch it: drop out/archive.bin on https://exhibitions.lockstep.it/replay
 ```
 
 (Condensed — the CLI prints every metric as a struct.) Thirteen frames:
@@ -397,7 +397,7 @@ refuses with that reason instead of training on nothing.
 ## Part 4 — reading a match
 
 The archive is the whole match, deterministically replayable. Drop
-`out/archive.bin` on <https://lockstep.it/replay> to watch it rendered
+`out/archive.bin` on <https://exhibitions.lockstep.it/replay> to watch it rendered
 (its **View results** button shows the graded view before playback even
 starts), or read the same thing in the terminal — `task match` prints it
 at the end, and `task report` prints it again for any archive
