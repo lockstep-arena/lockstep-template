@@ -171,7 +171,9 @@ def fetch_release(release: EnvRelease, out_dir: Path) -> dict[str, Path]:
     decl = declaration_json(release.slug, release.mode)
     decl_path = out_dir / "declaration.json"
     if decl is not None:
-        decl_path.write_text(decl)
+        # UTF-8 on purpose: the docs carry arrows and units, and Windows's
+        # default codec is not UTF-8.
+        decl_path.write_text(decl, encoding="utf-8")
         written["declaration.json"] = decl_path
     return written
 
