@@ -397,10 +397,14 @@ refuses with that reason instead of training on nothing.
 ## Part 4 — reading a match
 
 The archive is the whole match, deterministically replayable. Drop
-`out/archive.bin` on <https://lockstep.it/replay> to watch it rendered, or
-read the outcome straight off the CLI output above: final tick, rankings
-by seat, winner. Matches end when the engine says so — the brief's ENDS
-paragraph — never on a wall clock.
+`out/archive.bin` on <https://lockstep.it/replay> to watch it rendered
+(its **View results** button shows the graded view before playback even
+starts), or read the same thing in the terminal — `task match` prints it
+at the end, and `task report` prints it again for any archive
+(`ARCHIVE=<path>`): pass/fail, score, the headline metrics, then every
+metric with its label and unit — exactly the row this match would be on
+an assessment report. Matches end when the engine says so — the brief's
+ENDS paragraph — never on a wall clock.
 
 ## Part 5 — compete
 
@@ -426,9 +430,11 @@ Your agent joins the arena pool and shows up on the environment's
 **Your agents** tab. Re-upload as a revision with
 `task upload AGENT=walker AGENT_ID=<id>`.
 
-If you are here for a **hiring assessment**: this same upload is your
-submission — the first upload that verifies is final and later uploads are
-refused, so `task match` until you are happy first. By default it also
+If you are here for a **hiring assessment**: the upload that names it —
+`task upload AGENT=walker ASSESSMENT=<id>`, the exact command is on the
+assessment's Ship step — is your submission. It is final and later uploads
+to it are refused, so `task match` until you are happy first. An upload
+without `ASSESSMENT=` is a plain upload and never a submission. By default it also
 sends the text files under `agents/<name>/` as an employer-visible source
 archive — see the README's
 [assessment recipe](README.md#recipes) for exactly what the employer

@@ -194,13 +194,52 @@ tasks:
           --seed-hex 0703 \
           --out out/archive.bin
         echo "✓ match archived → out/archive.bin"
+        echo ""
+        # What the grader would show for this match — pass/fail, score, the
+        # headline metrics, the rest — with the declaration beside the
+        # engine giving every number its label.
+        DECL="$(dirname "$ENGINE")/declaration.json"
+        if [ -f "$DECL" ]; then
+          lockstep archive report out/archive.bin --declaration "$DECL"
+        else
+          lockstep archive report out/archive.bin
+        fi
+        echo ""
         echo "Watch it: drop out/archive.bin on https://lockstep.it/replay"
+        echo "Read it again any time: task report   (ARCHIVE=<path> for another archive)"
 
-  upload:
-    desc: "Upload an agent's bundle to compete — on an assessment this IS your submission: the first upload that verifies is final — plus its source as an employer-visible archive. Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision. SOURCE=0 to upload the bundle alone. APPROVE=1 to skip the CLI's confirmation prompt."
+  report:
+    desc: "What the grader would show for a local match: pass/fail, score, the headline metrics, then every metric with its label and unit — read straight off an archive. ARCHIVE=<path> (default out/archive.bin). Labels come from the declaration cached beside the environment's engine (task info / task match fetch it); without one the raw keys are shown."
+    vars:
+      ARCHIVE: '{{.ARCHIVE | default "out/archive.bin"}}'
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
+      - sh: lockstep archive report --help >/dev/null 2>&1
+        msg: "lockstep CLI is too old for task report (needs 0.1.10+) — update it: curl -fsSL https://dl.lockstep.it/install.sh | sh   (task doctor checks this too)"
+      - sh: test -f "{{.ARCHIVE}}"
+        msg: "no archive at {{.ARCHIVE}} — run a match first: task match"
+    cmds:
+      # The archive names its environment and mode; the declaration for
+      # that pair sits in the keyed cache when task info / match fetched it.
+      - |
+        set -e
+        DECL_ARGS=""
+        if command -v "{{.PY}}" >/dev/null 2>&1; then
+          DECL="$("{{.PY}}" -m train.core.engine --declaration-for "{{.ARCHIVE}}" 2>/dev/null || true)"
+          if [ -n "$DECL" ] && [ -f "$DECL" ]; then DECL_ARGS="--declaration $DECL"; fi
+        fi
+        lockstep archive report "{{.ARCHIVE}}" $DECL_ARGS
+
+  upload:
+    desc: "Upload an agent's bundle — plus its source as an employer-visible archive. ASSESSMENT=<id> makes it your submission to that hiring assessment (the id is on the assessment's Ship step, which prints this exact command); it is final. Without ASSESSMENT= the upload is a plain upload (a ladder build) and never a submission. Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision. SOURCE=0 to upload the bundle alone. APPROVE=1 to skip the CLI's confirmation prompt."
+    preconditions:
+      - sh: command -v lockstep
+        msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
+      # --assessment arrived in 0.1.10; an older CLI would upload without
+      # naming the assessment, which is never a submission.
+      - sh: lockstep agent upload --help 2>/dev/null | grep -q -- '--assessment'
+        msg: "lockstep CLI is too old for task upload (needs 0.1.10+) — update it: curl -fsSL https://dl.lockstep.it/install.sh | sh   (task doctor checks this too)"
       - sh: test -n "${LOCKSTEP_API_KEY:-}"
         msg: "LOCKSTEP_API_KEY not set — cp .env.example .env, then paste a key from the Authorization page at https://lockstep.it into LOCKSTEP_API_KEY="
     cmds:
@@ -237,11 +276,18 @@ tasks:
             echo "upload: this lockstep CLI predates --approve; it will ask for confirmation (update: curl -fsSL https://dl.lockstep.it/install.sh | sh)" >&2
           fi
         fi
+        # ASSESSMENT=<id>: this upload is the submission to that hiring
+        # assessment. Never inferred — an upload without it is a plain
+        # upload, whatever assessments are open.
+        ASSESSMENT_ARGS=""
+        if [ -n "{{.ASSESSMENT}}" ]; then
+          ASSESSMENT_ARGS="--assessment {{.ASSESSMENT}}"
+        fi
         if [ -n "{{.AGENT_ID}}" ]; then
-          lockstep agent upload --bundle "$BUNDLE" --agent-id "{{.AGENT_ID}}" $SOURCE_ARGS $APPROVE_ARGS
+          lockstep agent upload --bundle "$BUNDLE" --agent-id "{{.AGENT_ID}}" $ASSESSMENT_ARGS $SOURCE_ARGS $APPROVE_ARGS
         else
           lockstep agent upload --bundle "$BUNDLE" \
-            --display-name "$DISPLAY_NAME" --environment-id "$AGENT_ENV" $SOURCE_ARGS $APPROVE_ARGS
+            --display-name "$DISPLAY_NAME" --environment-id "$AGENT_ENV" $ASSESSMENT_ARGS $SOURCE_ARGS $APPROVE_ARGS
         fi
 
   test:

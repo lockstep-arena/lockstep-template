@@ -198,3 +198,22 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def declaration_json(slug: str, mode: str) -> str | None:
+    """The mode's declaration — the engine's ``SeatInit`` as the platform
+    publishes it (``environment/get`` → ``modes[].declaration_json``), the
+    same document the Interface tab and the report pages read. What
+    ``task report`` hands the CLI so a local match's metrics carry their
+    labels, units and headline order. ``None`` when the platform has none
+    for the mode (an unpublished release), or cannot be reached."""
+    from lockstep_train.fetch import _api_post
+
+    try:
+        payload = _api_post("environment/get", {"id": slug})
+    except RuntimeError:
+        return None
+    for m in (payload.get("environment") or {}).get("modes", []):
+        if m.get("key") == mode:
+            return m.get("declaration_json") or None
+    return None

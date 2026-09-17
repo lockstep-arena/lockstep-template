@@ -95,8 +95,9 @@ For `task upload` only: an API key. Copy `.env.example` to `.env` and fill in
 | `task info ENV= MODE=` | The environment's brief and wire layout — goal, reward, what ends an episode, how you are scored, every value with its slices or columns and units, the tags, the budgets — from the engine you will build against. Fetches the release (engine, shell, any data blobs) into the cache. |
 | `task train AGENT= RECIPE= STEPS= NUM_ENVS= RESUME=1 PARALLEL=1 SEEDS= EPOCHS=` | Train → ONNX → parity check → stage `agents/<name>/out/bundle` (python agents). `RECIPE=ppo` (default) learns from the reward; `RECIPE=supervised` fits the truth the environment reveals. The network is the agent's own `model.py` either way. |
 | `task build AGENT=` | Build the bundle without training: python exports YOUR `policy.py`; rust/c compile the wasm component. |
-| `task match AGENT=` | A real local match through the CLI, every seat your agent, archived to `out/archive.bin`. |
-| `task upload AGENT= NAME= AGENT_ID= APPROVE=1` | Upload the agent's bundle to compete. On an assessment the first upload that verifies is your submission, and it is final; `APPROVE=1` skips the confirmation prompt. |
+| `task match AGENT=` | A real local match through the CLI, every seat your agent, archived to `out/archive.bin` — and reported the way the grader would show it. |
+| `task report ARCHIVE=` | What the grader would show for a local match, read off its archive (default `out/archive.bin`): pass/fail, score, the headline metrics, then every metric with its label and unit. |
+| `task upload AGENT= ASSESSMENT= NAME= AGENT_ID= APPROVE=1` | Upload the agent's bundle. `ASSESSMENT=<id>` makes it your submission to that hiring assessment (the id is on the assessment's Ship step, which prints the exact command) — final; `APPROVE=1` skips the confirmation prompt. Without `ASSESSMENT=` it is a plain upload to the ladder and never a submission. |
 | `task test` | The template's own tests (hermetic + engine-backed + the wire references vs the spec goldens). |
 
 <details>
@@ -355,8 +356,10 @@ lockstep agent validate --bundle agents/my-bot/out/bundle
 Some companies use Lockstep environments as hands-on hiring assessments. If
 you received an invite link, the flow is this exact repo: practice locally
 as much as you like (`task build` / `task train` / `task match` on random
-scenarios, on the same engine that scores you), then `task upload` your
-best agent. **Upload is submit**: the first upload that verifies is your
+scenarios, on the same engine that scores you), then `task upload
+ASSESSMENT=<id>` your best agent — the id is on the assessment's Ship
+step, which prints the exact command. **That upload is your submission**:
+the one that verifies is your
 submission and it is final — the platform runs that bundle once over the
 role's frozen scenario suite, the score is what it is, and later uploads
 are refused. Run `task match` until you are happy before you upload.
@@ -408,7 +411,7 @@ artifacts come from the CDN, and the engine's own declaration does the rest.
 <summary><strong>What's in the box</strong></summary>
 
 ```
-Taskfile.yml            the whole surface (doctor/quickstart/setup/envs/create-agent/info/train/build/match/upload/test)
+Taskfile.yml            the whole surface (doctor/quickstart/setup/envs/create-agent/info/train/build/match/report/upload/test)
 train/
   doctor.py             `task doctor` — prerequisites, each with its fix
   scaffold.py           `task create-agent` — agent projects from the engine's declaration

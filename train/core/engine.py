@@ -163,6 +163,18 @@ def fetch_release(release: EnvRelease, out_dir: Path) -> dict[str, Path]:
         else:
             print(f"✓ {path} up to date", file=sys.stderr)
         written[f"{sub}/{file_name}"] = path
+    # The mode's declaration, beside the engine: what `task report` reads
+    # for metric labels, units and headline order. Fetched every time the
+    # release is — it is small, and it changes with the release.
+    from .discovery import declaration_json
+
+    decl = declaration_json(release.slug, release.mode)
+    decl_path = out_dir / "declaration.json"
+    if decl is not None:
+        # UTF-8 on purpose: the docs carry arrows and units, and Windows's
+        # default codec is not UTF-8.
+        decl_path.write_text(decl, encoding="utf-8")
+        written["declaration.json"] = decl_path
     return written
 
 
@@ -192,6 +204,48 @@ def ensure_engine(
     )
 
 
+def declaration_for_archive(archive: Path, cache_root: Path = CACHE_ROOT) -> Path | None:
+    """The cached ``declaration.json`` for the (environment, mode) an archive
+    names — read off its postcard header without decoding the frames. The
+    header starts with the archive version (u32 varint), then the
+    environment slug and the mode key, each a varint-length-prefixed UTF-8
+    string. ``None`` when the cache holds no declaration for that pair."""
+    try:
+        buf = archive.read_bytes()
+    except OSError:
+        return None
+    pos = 0
+
+    def varint() -> int:
+        nonlocal pos
+        shift, value = 0, 0
+        while True:
+            if pos >= len(buf):
+                raise ValueError("truncated archive header")
+            b = buf[pos]
+            pos += 1
+            value |= (b & 0x7F) << shift
+            if b < 0x80:
+                return value
+            shift += 7
+
+    def string() -> str:
+        nonlocal pos
+        n = varint()
+        s = buf[pos : pos + n].decode("utf-8", errors="replace")
+        pos += n
+        return s
+
+    try:
+        varint()  # archive_version
+        slug = string()
+        mode = string()
+    except (ValueError, UnicodeDecodeError):
+        return None
+    path = cache_root / slug / mode / "declaration.json"
+    return path if path.is_file() else None
+
+
 def cached_engines(cache_root: Path = CACHE_ROOT) -> list[Path]:
     """Every ``engine.wasm`` in the cache (for doctor / tests), sorted."""
     if not cache_root.is_dir():
@@ -202,7 +256,7 @@ def cached_engines(cache_root: Path = CACHE_ROOT) -> list[Path]:
 def main() -> None:
     utf8_output()
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--env", required=True, help="environment slug (ENV= on the task line)")
+    p.add_argument("--env", default=None, help="environment slug (ENV= on the task line)")
     p.add_argument("--version", default=None, help="release version; default latest")
     p.add_argument("--mode", default=None, help="mode key; default the release's default_mode")
     p.add_argument(
@@ -227,7 +281,24 @@ def main() -> None:
         action="store_true",
         help="print the resolved engine URL instead of downloading",
     )
+    p.add_argument(
+        "--declaration-for",
+        default=None,
+        metavar="ARCHIVE",
+        help="print the path of the cached declaration.json for the environment and "
+        "mode this archive names (what `task report` hands the CLI); nothing "
+        "and exit 1 when the cache has none",
+    )
     args = p.parse_args()
+
+    if args.declaration_for:
+        path = declaration_for_archive(Path(args.declaration_for))
+        if path is None:
+            sys.exit(1)
+        print(path)
+        return
+    if not args.env:
+        p.error("--env is required (ENV= on the task line)")
 
     if args.print_url:
         mode = resolve_mode(args.env, args.mode or None, Path(args.bundle) if args.bundle else None)
