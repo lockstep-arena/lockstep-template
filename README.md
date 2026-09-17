@@ -25,7 +25,7 @@ level, the domain) — nothing is named in this repo, so `ENV=` is always
 yours to pass.
 
 That ends with `out/archive.bin`: a whole match, scored by the real engine.
-Drop it on <https://lockstep.it/replay> to watch it. Then:
+Drop it on <https://exhibitions.lockstep.it/replay> to watch it. Then:
 
 ```sh
 task info ENV=go1-beacon         # what the environment IS — the brief and the wire, in this terminal
@@ -46,7 +46,7 @@ into a keyed cache (`out/cache/<env>/<mode>/`) the first time something
 needs one.
 
 Browse the catalog at
-[lockstep.it/exhibitions](https://lockstep.it/exhibitions); each
+[exhibitions.lockstep.it](https://exhibitions.lockstep.it); each
 environment's **Interface** tab is `task info` rendered as a page, and its
 **Practice** tab is this README, per environment.
 
@@ -469,7 +469,7 @@ the neutral action until you edit it. No ONNX, no Python at match time —
 Determinism is the platform's core bet: the engine is bit-identical across
 machines, so a local match IS a ranked match with different seats. The
 archive your match writes (`out/archive.bin`) drops straight onto
-[lockstep.it/replay](https://lockstep.it/replay).
+[exhibitions.lockstep.it/replay](https://exhibitions.lockstep.it/replay).
 
 </details>
 
