@@ -37,6 +37,7 @@ from .agents import AgentConfig, import_agent_module, resolve_agent
 from .core import utf8_output
 from .core.engine import ensure_engine
 from .core.stage import provenance, provenance_toml, stage
+from .hints import next_steps
 
 
 def manifest_text(cfg: AgentConfig, with_policy: bool) -> str:
@@ -195,10 +196,10 @@ def main() -> None:
     cfg = resolve_agent(args.agent)
     bundle = BUILDERS[cfg.lang](cfg)
     print(f"→ bundle: {bundle}", file=sys.stderr)
-    print(
-        f"\nRun it:   task match AGENT={cfg.name}\nCompete:  task upload AGENT={cfg.name}",
-        file=sys.stderr,
-    )
+    # The engine is already in the keyed cache (every builder fetched it or
+    # the scaffold did), so this is a lookup, not a download.
+    engine = ensure_engine(cfg.env, cfg.mode).engine
+    print(f"\n{next_steps(cfg.name, engine)}", file=sys.stderr)
 
 
 if __name__ == "__main__":

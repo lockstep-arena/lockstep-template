@@ -603,7 +603,7 @@ def gen_policy_py(cfg: AgentConfig, init) -> str:
     example_field = _lower(fields[0].name) if fields else None
     act = init.actions[0] if init.actions else None
     act_comment = (
-        f"the declared `{act.name}` value, {act.numel} element(s) in [-1, 1]"
+        f"the `{act.name}` action: {act.numel} value(s) per row, each in [-1, 1]"
         if act
         else "the declared action"
     )
@@ -614,22 +614,28 @@ def gen_policy_py(cfg: AgentConfig, init) -> str:
 
 Two ways to make this agent yours:
 
-1. HAND-WRITE IT (no training): edit ``forward`` below — read observations
-   by name via ``interface.py`` and emit whatever action you like.
-   ``task build AGENT={cfg.name}`` exports THIS module to ONNX, parity-checks
-   it and stages the submittable bundle. Out of the box it plays the
-   neutral action.
+1. WRITE IT BY HAND (no training): edit ``forward`` below. ``interface.py``
+   names every observation, so you read values by name, not by index.
+   ``task build AGENT={cfg.name}`` turns this module into the ONNX file your
+   agent ships, checks that the ONNX file gives the same answers as this
+   code, and packs the bundle you upload. As created it plays the neutral
+   action (what the environment does for a seat that sends nothing), so it
+   runs but does not try.
 
 2. TRAIN IT: ``task train AGENT={cfg.name}`` (PPO) or ``task train
-   AGENT={cfg.name} RECIPE=supervised`` builds the network in ``model.py``
-   over the same observations and stages the trained bundle instead. This
-   file is untouched by training.
+   AGENT={cfg.name} RECIPE=supervised`` trains the network in ``model.py``
+   on the same observations and packs that instead. Training never touches
+   this file.
 
-The exported graph's contract (the shell enforces it at match time): one
-input per declared observation, by name, at the declared shape; one output
-in [-1, 1] mapped affinely onto the declared action bounds. u8 values
-arrive here as f32 ÷ 255 (the shell normalizes them the same way); i32
-values arrive as int32.
+Then play it: ``task match AGENT={cfg.name}``. Add ``STEP=1`` to pause after
+every tick; to see numbers while you work, run the environment yourself in
+Python (``gymnasium.make("Lockstep/Env-v0", ...)``) and print or use pdb
+there — a trained or exported policy prints nothing during a match.
+
+What the network must look like (checked when it plays): one input per
+observation, named as declared, at the declared shape; one output with every
+value in [-1, 1], which the match stretches onto each action's declared
+range. u8 values (images) arrive divided by 255; i32 values arrive as int32.
 """
 
 from __future__ import annotations
@@ -663,8 +669,8 @@ class ScriptedPolicy(nn.Module):
         )
 
     def forward(self, *inputs: torch.Tensor) -> torch.Tensor:
-        """Inputs arrive batched, one per declared observation, in
-        ``self.input_names`` order ({act_comment} out).
+        """Inputs arrive batched, one tensor per declared observation, in
+        ``self.input_names`` order. Return {act_comment}.
         """
         batch = inputs[0].shape[0]
         # One observation, read through the generated interface —
@@ -1052,6 +1058,17 @@ def gen_lib_rs(cfg: AgentConfig, init) -> str:
             )
     else:
         obs_example = "        // (no observations declared)"
+    if init.obs:
+        # One commented line showing how to log what the agent sees; the
+        # CLI prefixes every line with the seat and tick.
+        t0 = init.obs[0]
+        # A u8 value is an image: print one byte, not the whole plane.
+        whole_image = t0.dtype == "u8" and not t0.columns and not t0.slices
+        label, expr = (f"{t0.name}[0]", "_first[0]") if whole_image else (_log_label(t0), "_first")
+        obs_example += (
+            f"\n        // eprintln!(\"{label} = {{:?}}\", {expr}); "
+            f"// see it: task match AGENT={cfg.name} LOGS=1"
+        )
     fields = action_fields(init)
     field_example = (
         f"        // Name a field to change it: Action {{ {_lower(fields[0].name)}: ..., ..Action::neutral() }}"
@@ -1060,17 +1077,20 @@ def gen_lib_rs(cfg: AgentConfig, init) -> str:
     )
     return f'''//! YOUR agent — written once by `task create-agent`, never overwritten.
 //!
-//! A hand-written wasm agent for {cfg.env} [{cfg.mode}]: no ONNX, no
-//! training — `on-tick` decodes the view with the vendored wire reader
-//! (`wire.rs`, tested against the spec goldens), reads it through the
-//! generated `interface::Obs`, and answers with an `interface::Action`.
-//! Out of the box it answers the NEUTRAL action.
+//! A hand-written agent for {cfg.env} [{cfg.mode}], compiled to
+//! WebAssembly. Every tick `on_tick` receives what your seat observes and
+//! returns your action: `wire.rs` unpacks the bytes, the generated
+//! `interface.rs` gives every observation, slice, column and action its
+//! name, and the code below decides. As created it plays the neutral action
+//! (what the environment does for a seat that sends nothing), so it runs but
+//! does not try.
 //!
-//! Build:  task build AGENT={cfg.name}   (cargo → wasm32-wasip2 component)
+//! Build:  task build AGENT={cfg.name}
 //! Match:  task match AGENT={cfg.name}
-//!
-//! `interface.rs` (generated) names every declared observation, slice,
-//! column and action — read and write by name, never by magic index.
+//! Debug:  task match AGENT={cfg.name} LOGS=1 STEP=1
+//!         (prints whatever you `eprintln!`, tagged with seat and tick, and
+//!         pauses after every tick; only on your machine — ranked matches
+//!         discard it)
 
 mod interface;
 mod wire;
@@ -1376,6 +1396,26 @@ def gen_interface_h(cfg: AgentConfig, init, budgets, title: str) -> str:
     return "\n".join(L) + "\n"
 
 
+def _log_label(t) -> str:
+    """How the scaffolds' example log line names the observation it reads —
+    the same element the typed-accessor example picks."""
+    if t.columns:
+        return f"{t.name}[0].{t.columns[0].name}"
+    if t.slices:
+        return f"{t.name}[{t.slices[0].name}]"
+    return t.name
+
+
+def _c_log(cfg: AgentConfig, label: str, expr: str, dtype: str, indent: str) -> str:
+    """One commented fprintf line for the C stub. u8/i32 print as ints,
+    f32 as a float."""
+    fmt, cast = ("%f", "(double)") if dtype == "f32" else ("%d", "(int)")
+    return (
+        f"{indent}/* fprintf(stderr, \"{label} = {fmt}\\n\", {cast}{expr});\n"
+        f"{indent}   see it: task match AGENT={cfg.name} LOGS=1 */"
+    )
+
+
 def gen_agent_c(cfg: AgentConfig, init) -> str:
     if init.obs:
         t = init.obs[0]
@@ -1383,11 +1423,13 @@ def gen_agent_c(cfg: AgentConfig, init) -> str:
         fn = f"obs_{_lower(t.name)}"
         shape = tuple(int(d) for d in t.shape)
         elem = _elem_type(t.dtype, "c")
+        label = _log_label(t)
         if t.dtype == "u8":
             example = (
                 f"    /* `{t.name}` — {(t.doc or t.name).splitlines()[0]} */\n"
                 f"    const uint8_t *{_lower(t.name)} = {fn}(&view);\n"
-                f"    (void){_lower(t.name)};"
+                f"    (void){_lower(t.name)};\n"
+                + _c_log(cfg, f"{t.name}[0]", f"({_lower(t.name)} ? {_lower(t.name)}[0] : 0)", "u8", "    ")
             )
         elif len(shape) == 0:
             example = (
@@ -1395,7 +1437,8 @@ def gen_agent_c(cfg: AgentConfig, init) -> str:
                 f"    {elem} {_lower(t.name)};\n"
                 f"    if ({fn}(&view, &{_lower(t.name)})) {{\n"
                 f"        (void){_lower(t.name)};\n"
-                f"    }}"
+                + _c_log(cfg, label, _lower(t.name), t.dtype, "        ")
+                + "\n    }"
             )
         elif len(shape) <= 3:
             if t.columns:
@@ -1403,17 +1446,22 @@ def gen_agent_c(cfg: AgentConfig, init) -> str:
                 use = (
                     f"        /* row 0, column `{c.name}` — {(c.doc or c.name).splitlines()[0]} */\n"
                     f"        {elem} first = {_lower(t.name)}[0]{'[0]' * (len(shape) - 2)}[{base}_COL_{_ident(c.name)}];\n"
-                    "        (void)first;"
+                    "        (void)first;\n"
+                    + _c_log(cfg, label, "first", t.dtype, "        ")
                 )
             elif t.slices:
                 s = t.slices[0]
                 use = (
                     f"        /* `{t.name}[{s.name}]` — {(s.doc or s.name).splitlines()[0]} */\n"
                     f"        {elem} first = {_lower(t.name)}[{base}_{_ident(s.name)}_START];\n"
-                    "        (void)first;"
+                    "        (void)first;\n"
+                    + _c_log(cfg, f"{t.name}[{s.name}][0]", "first", t.dtype, "        ")
                 )
             else:
-                use = f"        (void){_lower(t.name)};"
+                first_elem = f"{_lower(t.name)}" + "[0]" * len(shape)
+                use = f"        (void){_lower(t.name)};\n" + _c_log(
+                    cfg, f"{t.name}[0]", first_elem, t.dtype, "        "
+                )
             example = (
                 f"    /* `{t.name}` — {(t.doc or t.name).splitlines()[0]} */\n"
                 f"    {elem} {_lower(t.name)}{_c_array_dims(shape)};\n"
@@ -1427,7 +1475,8 @@ def gen_agent_c(cfg: AgentConfig, init) -> str:
                 f"    {elem} {_lower(t.name)}[{base}_LEN];\n"
                 f"    if ({fn}(&view, {_lower(t.name)})) {{\n"
                 f"        (void){_lower(t.name)};\n"
-                f"    }}"
+                + _c_log(cfg, f"{t.name}[0]", f"{_lower(t.name)}[0]", t.dtype, "        ")
+                + "\n    }"
             )
     else:
         example = "    /* (no observations declared) */"
@@ -1439,20 +1488,23 @@ def gen_agent_c(cfg: AgentConfig, init) -> str:
     )
     return f'''/* YOUR agent — written once by `task create-agent`, never overwritten.
  *
- * A hand-written wasm agent for {cfg.env} [{cfg.mode}]: no ONNX, no
- * training — `on-tick` decodes the view with the vendored wire reader
- * (wire.c/wire.h, tested against the spec goldens), reads it through
- * the typed accessors in interface.h, and answers with an agent_action_t.
- * Out of the box it answers the NEUTRAL action.
+ * A hand-written agent for {cfg.env} [{cfg.mode}], compiled to
+ * WebAssembly. Every tick exports_agent_on_tick receives what your seat
+ * observes and returns your action: wire.c unpacks the bytes, the
+ * generated interface.h gives every observation, slice, column and action
+ * its name, and the code below decides. As created it plays the neutral
+ * action (what the environment does for a seat that sends nothing), so it
+ * runs but does not try.
  *
- * Build:  task build AGENT={cfg.name}   (wit-bindgen c + wasi-sdk clang
- *                                        → wasm32-wasip2 component)
+ * Build:  task build AGENT={cfg.name}
  * Match:  task match AGENT={cfg.name}
- *
- * interface.h (generated) names every declared observation, slice,
- * column and action — read and write by name, never by magic index.
+ * Debug:  task match AGENT={cfg.name} LOGS=1 STEP=1
+ *         (prints whatever you fprintf to stderr, tagged with seat and
+ *         tick, and pauses after every tick; only on your machine — ranked
+ *         matches discard it)
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 

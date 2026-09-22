@@ -87,3 +87,62 @@ def _assert_component(wasm) -> None:
         text=True,
     ).stdout
     assert "export init" in out and "export on-tick" in out, out
+
+
+def _uncomment_log_line(path) -> None:
+    """Turn the scaffold's commented example log line into live code, the
+    way a builder would to see it under `task match LOGS=1`."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".rs":
+        before = "// eprintln!("
+        assert before in text, text
+        text = text.replace(before, "eprintln!(", 1)
+    else:
+        before = "/* fprintf(stderr,"
+        assert before in text, text
+        text = text.replace(before, "fprintf(stderr,", 1)
+        text = text.replace("   see it: task match", "/* see it: task match", 1)
+    path.write_text(text, encoding="utf-8")
+
+
+def _rotated(n: int):
+    """The synthetic declaration with observation `n` first, so the example
+    line is generated for each kind of value: an image, a sliced vector, a
+    table with columns, an i32 table."""
+    init = synthetic_init()
+    init.obs = init.obs[n:] + init.obs[:n]
+    return init
+
+
+@pytest.mark.skipif(not _has_wasip2(), reason="no cargo/wasm32-wasip2 — task setup LANGS=rust")
+@pytest.mark.parametrize("first", range(4))
+def test_rust_log_line_compiles_when_uncommented(agent_env, first):
+    cfg = cfg_for("rust")
+    scaffold_mod.scaffold_rust(cfg, _rotated(first), BUDGETS, "t")
+    _uncomment_log_line(cfg.dir / "src" / "lib.rs")
+    subprocess.run(
+        [
+            "cargo",
+            "build",
+            "--release",
+            "--target",
+            "wasm32-wasip2",
+            "--manifest-path",
+            str(cfg.dir / "Cargo.toml"),
+        ],
+        check=True,
+    )
+
+
+@pytest.mark.skipif(
+    find_wasi_sdk() is None or find_wit_bindgen() is None,
+    reason="no wasi-sdk/wit-bindgen — task setup LANGS=c",
+)
+@pytest.mark.parametrize("first", range(4))
+def test_c_log_line_compiles_when_uncommented(agent_env, first):
+    from train.build import compile_c_agent
+
+    cfg = cfg_for("c")
+    scaffold_mod.scaffold_c(cfg, _rotated(first), BUDGETS, "t")
+    _uncomment_log_line(cfg.dir / "agent.c")
+    assert compile_c_agent(cfg.dir).is_file()

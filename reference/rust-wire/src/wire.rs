@@ -1,14 +1,20 @@
-//! A HAND-WRITTEN Lockstep-wire (v1) reader/writer — the whole point.
+//! A hand-written reader and writer for the Lockstep wire (version 1).
 //!
-//! The wire is a *spec*, not a library: this file re-implements it from the
-//! published document (`docs/wire.md` in this template — the vendored copy
-//! of the platform's normative spec) in a few hundred lines, with no
-//! dependency on the reference crate. If you are porting an agent to Go,
-//! Zig or C, this file is the shape of what you will write. The goldens
-//! under `tests/fixtures/` (published with the spec) pin it: `cargo test`
-//! decodes and re-encodes them byte-for-byte.
+//! Every environment sends your agent the same three generic messages: a
+//! declaration once (`SeatInit`: what you observe and what you may do, with
+//! names, shapes, bounds and docs), then an observation every tick (`View`),
+//! and your agent answers with an action every tick (`Input`). This file
+//! decodes and encodes those messages. What the numbers MEAN for your
+//! environment is in the generated `interface.rs` next to this file (and on
+//! the environment's Interface page, or `task info`).
 //!
-//! Encoding rules (the short version — the spec is normative):
+//! The format is described in `docs/wire.md` of the agent template, and this
+//! file implements it in a few hundred lines with no dependencies. If you are
+//! porting an agent to Go, Zig or another language, this is the shape of what
+//! you will write. The golden files under `tests/fixtures/` pin it:
+//! `cargo test` decodes and re-encodes them byte-for-byte.
+//!
+//! Encoding rules (the short version — `docs/wire.md` has the whole thing):
 //! - everything little-endian; `f32` is IEEE-754 binary32
 //! - `str` = `u16` length + UTF-8 bytes, no terminator
 //! - every value, slice and column carries a `doc` string (slices and

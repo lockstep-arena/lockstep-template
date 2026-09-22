@@ -34,7 +34,8 @@ task build AGENT=my-bot          # your hand-written policy, no training
 task train AGENT=my-bot          # or: a short PPO run → ONNX → parity check → the same bundle
 task train AGENT=my-bot RECIPE=supervised   # or: fit the truth the environment reveals (data environments)
 task match AGENT=my-bot          # your agent in every seat, archived to out/archive.bin
-task upload AGENT=my-bot         # compete (needs LOCKSTEP_API_KEY in .env)
+task match AGENT=my-bot LOGS=1 STEP=1   # debug: your agent's log lines, one tick at a time
+task upload AGENT=my-bot         # submit your final bundle (needs LOCKSTEP_API_KEY in .env)
 ```
 
 The unit of work is an **agent**: `agents/<name>/`, scaffolded by
@@ -95,10 +96,57 @@ For `task upload` only: an API key. Copy `.env.example` to `.env` and fill in
 | `task info ENV= MODE=` | The environment's brief and wire layout — goal, reward, what ends an episode, how you are scored, every value with its slices or columns and units, the tags, the budgets — from the engine you will build against. Fetches the release (engine, shell, any data blobs) into the cache. |
 | `task train AGENT= RECIPE= STEPS= NUM_ENVS= RESUME=1 PARALLEL=1 SEEDS= EPOCHS=` | Train → ONNX → parity check → stage `agents/<name>/out/bundle` (python agents). `RECIPE=ppo` (default) learns from the reward; `RECIPE=supervised` fits the truth the environment reveals. The network is the agent's own `model.py` either way. |
 | `task build AGENT=` | Build the bundle without training: python exports YOUR `policy.py`; rust/c compile the wasm component. |
-| `task match AGENT=` | A real local match through the CLI, every seat your agent, archived to `out/archive.bin` — and reported the way the grader would show it. |
+| `task match AGENT= OPPONENTS= LOGS=1 STEP=1 UNTIL=` | A real local match through the CLI, archived to `out/archive.bin` and reported the way the grader would show it. Your agent takes every seat, or `OPPONENTS="bot-2 bot-3"` seats your other agents beside it. `LOGS=1` / `STEP=1` / `UNTIL=N` are for [debugging](#debugging-your-agent). |
 | `task report ARCHIVE=` | What the grader would show for a local match, read off its archive (default `out/archive.bin`): pass/fail, score, the headline metrics, then every metric with its label and unit. |
 | `task upload AGENT= ASSESSMENT= NAME= AGENT_ID= APPROVE=1` | Upload the agent's bundle. `ASSESSMENT=<id>` makes it your submission to that hiring assessment (the id is on the assessment's Ship step, which prints the exact command) — final; `APPROVE=1` skips the confirmation prompt. Without `ASSESSMENT=` it is a plain upload to the ladder and never a submission. |
 | `task test` | The template's own tests (hermetic + engine-backed + the wire references vs the spec goldens). |
+
+## Debugging your agent
+
+`task match` can show you what your agent sees and decides, one tick at a
+time. All of it happens on your machine: in ranked, assessment and learner
+matches the platform throws away anything an agent prints, so leaving a log
+line in costs nothing but a little time.
+
+```sh
+task match AGENT=my-bot LOGS=1 STEP=1
+```
+
+- **Logs.** `LOGS=1` prints whatever your agent writes to stdout or stderr,
+  tagged with its seat and the tick it was written in:
+
+  ```
+  [seat 0 · t0] obs[trunk_quat] = [0.99977034, 0.0, 0.0, -0.021429313]
+  [seat 0 · t1] obs[trunk_quat] = [0.9997204, -0.00026506706, -0.010025185, -0.021413336]
+  ```
+
+  In Rust that is `eprintln!`, in C `fprintf(stderr, …)`. The scaffolded
+  `on_tick` already has one commented-out line that prints the observation
+  it reads — uncomment it to start. A line over 1 KiB is cut, and after
+  4 MiB in one match the rest is dropped with a notice.
+- **Stepping.** `STEP=1` pauses after every tick and waits for you: Enter
+  plays the next tick, `c` runs to the end, a number runs to that tick,
+  and `q` stops and still writes the archive of what was played.
+  `UNTIL=312` runs straight to tick 312 and pauses there. Ticks count from
+  0. Pausing never costs your agent time: the pause sits between ticks, and
+  the time limit only runs while your code does.
+- **Reruns are identical.** `task match` always plays the same seed, and your
+  agent's own randomness (Rust's `rand`, C's `getentropy`, anything reading
+  WASI random) is seeded from it too. The same command replays the same
+  match, so tick 312 is the same tick 312 every time you come back to it.
+- **Trained policies.** A python agent ships as an ONNX file inside a generic
+  shell that prints nothing, so `LOGS=1` stays quiet for it. Step through a
+  match with `STEP=1` to watch it, and debug the policy itself in your own
+  Python loop over `gymnasium.make("Lockstep/Env-v0", engine_source=…)`,
+  where `print` and `pdb` work as usual.
+- **Against your other agents.** In an environment with more than one seat,
+  `OPPONENTS="other-bot"` puts another of your agents in seat 1; name more,
+  space-separated, for further seats. Each must be built for the same
+  environment and mode as `AGENT=`. Seats you leave unnamed are played by
+  your own agent. `task build` prints the right example for the
+  environment you are in.
+
+These need the lockstep CLI 0.1.11 or newer; `task doctor` checks.
 
 <details>
 <summary><strong>Reading an environment: <code>task info</code> and the generated interface</strong></summary>
@@ -417,6 +465,8 @@ train/
   scaffold.py           `task create-agent` — agent projects from the engine's declaration
   agents.py             agents/<name>/agent.toml — identity + AGENT= resolution
   build.py              `task build` — python export / rust cargo / c wasi-sdk → bundle
+  hints.py              the "Run it / Debug it / Submit final bundle" lines after a build
+  lineup.py             `task match OPPONENTS=` — who sits in which seat
   toolchain.py          `task setup LANGS=` — detect-first toolchain provisioning
   main.py               `task train` — train → export → parity-check → stage
   core/discovery.py     `task envs` + release resolution, both through the platform API
@@ -482,10 +532,9 @@ slices with units (or documented columns, for a table-shaped value),
 free-form metadata, the seat's brief — goal, reward, what ends an episode
 — and the metrics the session will report, each with a unit and a
 direction. Every tick after that is positional, near-raw blobs the
-declaration explains. Little-endian, no codegen — the spec fits on a page
-([docs/wire.md](docs/wire.md) — copied verbatim from the platform's
-interface repo at every release), and `reference/rust-wire` +
-`reference/c-wire` re-implement it from scratch to prove the point. The
+declaration explains. Little-endian, no codegen — the format is described
+in [docs/wire.md](docs/wire.md), and `reference/rust-wire` +
+`reference/c-wire` implement it from scratch to prove the point. The
 generic ONNX shell, the Python env, `task info`, the environment's
 Interface page, your generated interface files and your hand-written agent
 all read the same declaration.

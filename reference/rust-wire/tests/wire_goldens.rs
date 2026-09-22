@@ -1,6 +1,7 @@
-//! The hand-written decoder against the SPEC's published golden encodings
-//! (`tests/fixtures/*.bin`, vendored alongside `docs/wire.md` from the
-//! platform's interface repo). If these pass, the decoder speaks the same wire as every engine.
+//! The hand-written decoder against the golden encodings published with the
+//! wire format (`tests/fixtures/*.bin`, described in the template's
+//! `docs/wire.md`). If these pass, the decoder speaks the same wire as every
+//! environment.
 
 use lockstep_wire_reference::wire::{
     encode_input, f32_bytes, Dtype, MetricDirection, MetricKind, SeatInit, View,

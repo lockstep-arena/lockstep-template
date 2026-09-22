@@ -1,12 +1,18 @@
-/* A HAND-WRITTEN Lockstep-wire (v1) reader/writer in C99 — the whole point.
+/* A hand-written reader and writer for the Lockstep wire (version 1), in C99.
  *
- * The wire is a *spec*, not a library: this pair (wire.h / wire.c)
- * re-implements it from the published document (docs/wire.md in this
- * template — the vendored copy of the platform's normative spec) with no
- * dependencies beyond libc. It is the C twin of reference/rust-wire's
- * wire.rs, tested by `task test` against the same golden encodings.
+ * Every environment sends your agent the same three generic messages: a
+ * declaration once (seat-init: what you observe and what you may do, with
+ * names, shapes, bounds and docs), then an observation every tick (view), and
+ * your agent answers with an action every tick (input). This pair (wire.h /
+ * wire.c) decodes and encodes those messages. What the numbers MEAN for your
+ * environment is in the generated interface.h next to it (and on the
+ * environment's Interface page, or `task info`).
  *
- * Encoding rules (the short version — the spec is normative):
+ * The format is described in docs/wire.md of the agent template; this needs
+ * nothing beyond libc. It is the C twin of the template's
+ * reference/rust-wire, tested by `task test` against the same golden files.
+ *
+ * Encoding rules (the short version — docs/wire.md has the whole thing):
  * - everything little-endian; f32 is IEEE-754 binary32
  * - str = u16 length + UTF-8 bytes, no terminator
  * - every value, slice and column carries a doc string (slices and columns
