@@ -44,6 +44,7 @@ that language exists under `agents/`.
 - [Part 3 — a trained agent](#part-3--a-trained-agent)
 - [Data environments: the supervised recipe](#data-environments-the-supervised-recipe)
 - [Part 4 — reading a match](#part-4--reading-a-match)
+- [Debugging: logs, stepping, reruns](#debugging-logs-stepping-reruns)
 - [Part 5 — compete](#part-5--compete)
 - [The advanced track: Rust and C](#the-advanced-track-rust-and-c)
 - [Two seats learning at once](#two-seats-learning-at-once)
@@ -263,8 +264,9 @@ task build AGENT=walker
 ✓ torch/onnxruntime parity: max abs diff 0.000e+00
 → bundle: agents/walker/out/bundle
 
-Run it:   task match AGENT=walker
-Compete:  task upload AGENT=walker
+Run it:               task match AGENT=walker
+Debug it:             task match AGENT=walker LOGS=1 STEP=1
+Submit final bundle:  task upload AGENT=walker
 ```
 
 (torch's ONNX exporter prints a few opset warnings above these lines; they
@@ -312,8 +314,9 @@ task train AGENT=walker STEPS=64 NUM_ENVS=1     # tiny — proves the pipeline i
 ✓ torch/onnxruntime parity: max abs diff 7.451e-08
 → bundle: agents/walker/out/bundle
 
-Run it:   task match
-Compete:  task upload
+Run it:               task match AGENT=walker
+Debug it:             task match AGENT=walker LOGS=1 STEP=1
+Submit final bundle:  task upload AGENT=walker
 ```
 
 The network is the one in `agents/walker/model.py`, scaffolded from the
@@ -405,6 +408,38 @@ at the end, and `task report` prints it again for any archive
 metric with its label and unit — exactly the row this match would be on
 an assessment report. Matches end when the engine says so — the brief's
 ENDS paragraph — never on a wall clock.
+
+## Debugging: logs, stepping, reruns
+
+go1-beacon seats one agent, so `task build` printed no opponents hint. In an
+environment with two or more seats it adds one — `OPPONENTS="other-bot"` —
+and `task match AGENT=walker OPPONENTS="other-bot"` puts your second agent in
+seat 1.
+
+To watch a match tick by tick:
+
+```sh
+task match AGENT=walker STEP=1
+```
+
+After every tick the match stops and asks:
+
+```
+── tick 0 done · Enter: next tick · c: run to the end · N: run to tick N · q: stop ▸
+```
+
+Enter plays one more tick, `c` runs to the end, `12` runs to tick 12 and asks
+again, and `q` stops with the archive of what was played. `UNTIL=12` does the
+running for you and pauses at tick 12. A Python agent prints nothing during a
+match (it ships as an ONNX file inside a generic shell), so to see numbers
+while you work, run the environment in your own loop —
+`gymnasium.make("Lockstep/Env-v0", engine_source=...)` — and `print` there.
+The Rust and C agents below can print from inside the match; see
+[their section](#the-advanced-track-rust-and-c).
+
+Every run of `task match` is the same match: the seed is fixed, and your
+agent's own randomness is seeded from it. What you see at tick 12 today is
+what you see at tick 12 tomorrow, until you change the agent.
 
 ## Part 5 — compete
 
@@ -509,6 +544,30 @@ agent_action_encode(&action, &ret->ptr, &ret->len);
 ```
 
 Bytes in, bytes out.
+
+Both stubs carry one commented-out line in `on_tick` that prints the
+observation they read. Uncomment it, rebuild, and run with `LOGS=1`:
+
+```sh
+task build AGENT=ferrous
+task match AGENT=ferrous LOGS=1 UNTIL=3
+```
+
+```
+[seat 0 · t0] obs[trunk_quat] = [0.99977034, 0.0, 0.0, -0.021429313]
+[seat 0 · t1] obs[trunk_quat] = [0.9997204, -0.00026506706, -0.010025185, -0.021413336]
+[seat 0 · t2] obs[trunk_quat] = [0.99929297, -0.0008493755, -0.030921118, -0.021372195]
+[seat 0 · t3] obs[trunk_quat] = [0.99839395, -0.0014255666, -0.052468058, -0.021320194]
+── tick 3 done · Enter: next tick · c: run to the end · N: run to tick N · q: stop ▸
+```
+
+That is the neutral stance tipping over: the quaternion is `wxyz`, and its
+`y` component (pitch) grows a little every tick until the Go1 falls at
+tick 12, the fall Part 2 described.
+
+Every line is tagged with the seat and tick it was written in. Print as much
+as you like while you work: nothing leaves your machine, and ranked matches
+throw agent output away.
 
 ## Two seats learning at once
 

@@ -76,9 +76,10 @@ def check_task() -> Check:
 
 #: The oldest CLI whose commands take every flag the template passes
 #: (`--clamp-seats` on `match run` arrived in 0.1.5, `--assessment` on
-#: `agent upload` and `archive report` in 0.1.10). The installer always
-#: fetches the newest, so "update" is the whole fix.
-MIN_CLI = (0, 1, 10)
+#: `agent upload` and `archive report` in 0.1.10, `--agent-logs` / `--step`
+#: / `--until-tick` in 0.1.11). The installer always fetches the newest, so
+#: "update" is the whole fix.
+MIN_CLI = (0, 1, 11)
 
 
 def _parse_version(text: str) -> tuple[int, ...] | None:
@@ -109,7 +110,7 @@ def check_cli() -> Check:
             "lockstep CLI",
             False,
             True,
-            f"{out} at {path} — older than {want}, so `task upload` / `task match` / `task report` fail on flags it does not know",
+            f"{out} at {path} — older than {want}, so `task match` / `task upload` / `task report` fail on flags it does not know",
             f"update it (the installer fetches the newest): {install}",
         )
     return Check("lockstep CLI", True, True, f"{out or 'present'} at {path}")

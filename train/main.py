@@ -220,6 +220,7 @@ def main() -> None:
 
     build = Policy
     supervised_block: dict | None = None
+    agent_name: str | None = None
     if args.agent or not args.env:
         from .agents import policy_builder, resolve_agent
 
@@ -230,6 +231,7 @@ def main() -> None:
                 f"python path; build it instead: task build AGENT={cfg.name}"
             )
         env_slug, env_mode = cfg.env, args.mode or cfg.mode
+        agent_name = cfg.name
         out_dir, bundle_dir = cfg.out_dir, cfg.bundle_dir
         build = policy_builder(cfg)
         supervised_block = cfg.supervised
@@ -348,7 +350,9 @@ def main() -> None:
         provenance_table=provenance_table,
     )
     print(f"→ bundle: {bundle}")
-    print("\nRun it:   task match\nCompete:  task upload")
+    from .hints import next_steps
+
+    print(f"\n{next_steps(agent_name, engine)}")
 
 
 if __name__ == "__main__":

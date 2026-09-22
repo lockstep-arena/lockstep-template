@@ -159,21 +159,24 @@ tasks:
       - '"{{.PY}}" -m train.build {{if .AGENT}}--agent "{{.AGENT}}"{{end}}'
 
   match:
-    desc: "Run a real local match with an agent's bundle in every seat. AGENT= (defaults to the sole agent) — or BUNDLE=<dir|.wasm> for a bundle from anywhere; ENV=/MODE= only matter with BUNDLE="
+    desc: "Run a real local match. AGENT= (defaults to the sole agent) takes every seat — or OPPONENTS=\"bot-2 bot-3\" puts your other agents in the next seats, in order. Debug: LOGS=1 prints what your agent writes to stdout/stderr, tagged with seat and tick; STEP=1 pauses after every tick (Enter / c / N / q); UNTIL=N runs to tick N, then pauses. Reruns are identical (seeded). BUNDLE=<dir|.wasm> for a bundle from anywhere; ENV=/MODE= only matter with BUNDLE="
+    # STEP=1 / UNTIL= read your answers from this terminal.
+    interactive: true
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
-      # The flags below need CLI >= 0.1.5; an older one fails with
-      # "unexpected argument '--clamp-seats'", which says nothing useful.
-      - sh: lockstep match run --help 2>/dev/null | grep -q -- '--clamp-seats'
-        msg: "lockstep CLI is too old for task match (needs 0.1.5+) — update it: curl -fsSL https://dl.lockstep.it/install.sh | sh   (task doctor checks this too)"
+      # The flags below need CLI >= 0.1.11 (--agent-logs, --step, --until-tick
+      # and seeded agent randomness); an older one fails with "unexpected
+      # argument", which says nothing useful.
+      - sh: lockstep match run --help 2>/dev/null | grep -q -- '--agent-logs'
+        msg: "lockstep CLI is too old for task match (needs 0.1.11+) — update it: curl -fsSL https://dl.lockstep.it/install.sh | sh   (task doctor checks this too)"
+      - sh: test -z "{{.OPPONENTS}}" || test -z "{{.BUNDLE}}"
+        msg: "OPPONENTS= seats your other agents next to AGENT= — it does not combine with BUNDLE="
     cmds:
       # The bundle's own lockstep.toml picks the mode (--bundle), and the
       # keyed cache means fetching one mode's engine can never replace
       # another's — the old mode-mismatch footgun (an agent that can't read
       # a single observation) is structurally impossible.
-      # --clamp-seats: both seats are this bundle; a solo environment clamps
-      # to its single seat, a duel keeps two.
       - |
         set -e
         if [ -n "{{.BUNDLE}}" ]; then
@@ -187,11 +190,26 @@ tasks:
           exit 1
         fi
         ENGINE="$("{{.PY}}" -m train.core.engine --env "$MATCH_ENV" {{if .MODE}}--mode "{{.MODE}}"{{end}} --bundle "$BUNDLE" --print-path)"
+        # Seats: your agent everywhere, or seat 0 plus OPPONENTS in order
+        # (checked: same environment and mode, room on the roster, built).
+        if [ -n "{{.OPPONENTS}}" ]; then
+          SEATS="$("{{.PY}}" -m train.lineup {{if .AGENT}}--agent "{{.AGENT}}"{{end}} --opponents "{{.OPPONENTS}}")"
+        else
+          SEATS="$BUNDLE $BUNDLE"
+        fi
+        DEBUG_ARGS=""
+        {{if and .LOGS (ne .LOGS "0")}}DEBUG_ARGS="$DEBUG_ARGS --agent-logs"{{end}}
+        {{if and .STEP (ne .STEP "0")}}DEBUG_ARGS="$DEBUG_ARGS --step"{{end}}
+        {{if .UNTIL}}DEBUG_ARGS="$DEBUG_ARGS --until-tick {{.UNTIL}}"{{end}}
+        # The fixed seed makes every run of this command the same match —
+        # the engine's scenario and your agent's own randomness alike.
+        # --clamp-seats: a solo environment keeps one seat, a duel two.
         lockstep match run --slug "$MATCH_ENV" \
           --engine "$ENGINE" \
-          --agents "$BUNDLE" "$BUNDLE" \
+          --agents $SEATS \
           --clamp-seats \
           --seed-hex 0703 \
+          $DEBUG_ARGS \
           --out out/archive.bin
         echo "✓ match archived → out/archive.bin"
         echo ""

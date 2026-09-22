@@ -1,14 +1,27 @@
 # The Lockstep wire — version 1
 
-This is the **normative spec** of the agent-facing payload every Lockstep
-environment speaks. The reference reader is the Rust module `wire.rs`
-(`lockstep_interface::wire` in the interface crate; the template ships the same
-reader verbatim as `reference/rust-wire`, with a C99 twin in
-`reference/c-wire`); `lockstep-train` (Python) is another conforming decoder;
-the wire goldens — `{seat_init,view,input}.bin` + `.json`, under
-`tests/fixtures/wire/` in the interface crate and
-`reference/rust-wire/tests/fixtures/` in the template — are the encodings all
-of them are tested against.
+Every Lockstep environment talks to agents with the same three messages. This
+document describes those generic messages: how an environment declares what
+you will observe and what you may do, how each tick's observation and your
+reply are packed into bytes, and the rules every environment keeps.
+
+It does not say what any particular environment's numbers mean. Each
+environment tells you that itself, from the same declaration described here:
+
+- its **Interface** page on [exhibitions.lockstep.it](https://exhibitions.lockstep.it),
+- `task info ENV=<slug>` in the agent template, which prints the same page in
+  your terminal,
+- the interface file `task create-agent` generates for your agent
+  (`interface.py`, `src/interface.rs` or `interface.h`), which names every
+  observation, slice and column as a constant.
+
+Most people never need this document: the template's generated code and the
+Python package `lockstep-train` already read the wire for you. Read it when
+you want to write a reader in another language, or to understand exactly what
+the generated code does. The template's `reference/rust-wire` (Rust) and
+`reference/c-wire` (C99) are complete readers in a few hundred lines, and
+`lockstep-train` is a third; all three are tested against the same golden
+encodings (see *Golden fixtures* at the end).
 
 ## The mental model
 
@@ -122,8 +135,7 @@ metric describes the seed (a mass, a drift tick, an adversary tier) and is
 shown to employers only; its key keeps the `scenario-` prefix so that
 redaction works for engines that declare no specs at all. The canonical keys
 every environment emits — `score`, `success`, `ticks`, `bad-inputs`,
-`fail-tick`, `fail-<reason>` — are declared by the environment kit, not by
-each environment.
+`fail-tick`, `fail-<reason>` — mean the same thing everywhere.
 
 ### `SeatInit` as a whole
 
@@ -139,12 +151,12 @@ each environment.
 
 | Consumer | name | dtype | shape | bounds | doc / slices / columns | metrics |
 |---|---|---|---|---|---|---|
-| wire decoders (this crate, `lockstep-train`, the template's Rust and C readers) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| wire decoders (`lockstep-train`, the template's Rust and C readers) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | per-tick `View` / `Input` byte checks | | ✓ | ✓ | | | |
-| the environment kit's neutral action + clamp | | ✓ | ✓ | ✓ | | |
+| every environment's neutral action + clamp | | ✓ | ✓ | ✓ | | |
 | `lockstep-train` spaces | ✓ | ✓ | ✓ | ✓ | | |
 | the ONNX shell (feed by name; map outputs onto bounds) | ✓ | ✓ | ✓ | ✓ | | |
-| the verifier's ONNX preflight (signature) | ✓ | ✓ | ✓ | | | |
+| the upload check on an ONNX policy's signature | ✓ | ✓ | ✓ | | | |
 | the template scaffolder (`interface.{py,rs,h}`, `model.py`) | ✓ | ✓ | ✓ | ✓ | slices + columns → constants; docs → comments | ✓ |
 | `task info`, `lockstep_train.info`, the Interface page | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ ("how you are scored") |
 | the hiring report, compare, the candidate's result | | | | | | ✓ |
@@ -291,11 +303,10 @@ so an adversarial second seat can state its own goal:
 
 Then the tail: the declared metrics.
 
-The platform captures the decoded seat-0 `SeatInit` at release time as the
-mode's `declaration_json` (the same JSON shape `serde` gives
-`wire::SeatInit`; see the `seat_init.json` wire golden).
-The Interface page, the hiring report and `lockstep_train.info` all render
-from that capture.
+The platform keeps a copy of seat 0's `SeatInit` from every release (as JSON,
+in the shape of the `seat_init.json` golden). The Interface page, the hiring
+report and `python -m lockstep_train.info --env <slug>` all render from that
+copy.
 
 ### `View`
 
@@ -327,9 +338,6 @@ are finite (per-element bounds first, else the scalar pair), **else 0**;
 `f32` action element into its bounds before use, so an agent can never drive
 an actuator past `ctrlrange`.
 
-`wire::Input::decode_for(bytes, &actions)` is this rule; `wire::
-ValueSpec::neutral_f32` / `clamp_f32` are the pieces.
-
 Because the neutral action is what a missed or malformed tick does, an
 environment chooses its bounds so that the neutral action is the **safe
 default** for its domain — no alert, approve, send to review, stay flat — and
@@ -337,7 +345,8 @@ the `doc` of the action says so in words.
 
 ## The ONNX signature
 
-The platform's generic ONNX shell (`agent-onnx`) runs an exported policy
+The platform's generic ONNX shell (`agent-onnx.wasm`, fetched beside every
+engine) runs an exported policy
 against this wire with no per-environment code, so the model's signature is
 fixed by the declaration:
 
@@ -367,60 +376,18 @@ fixed by the declaration:
   refused by the shell and by `lockstep-train`'s encoder; it never becomes a
   silently-misread action.
 
-## Documenting your environment
+## How environments document themselves
 
-The declaration is the documentation. Write it with the builders:
+The declaration is the documentation, and every published environment is
+checked for gaps before release: an empty brief paragraph, an observation,
+action, slice, column or metric with no `doc`, elements of a sliced value
+that no slice covers, overlapping slices, or a slice that runs past its
+value. A value with no slices or columns (an image plane) is explained by its
+`doc` alone. If `task info` ends with an `UNDOCUMENTED` section, the
+environment missed something — tell its maintainers.
 
-```rust
-ValueSpec::f32_vec("obs", 54, -INF, INF)
-    .with_doc("everything the policy sees this tick, trunk-relative")
-    .with_documented_slices(&[
-        ("trunk_quat", 4, "body orientation", "unit quaternion wxyz, world frame"),
-        ("beacon_body", 3, "beacon minus trunk, rotated into the trunk frame", "m, trunk frame"),
-        ("time_left", 1, "fraction of the episode remaining", ""),
-    ]);
-
-ValueSpec::f32_value("history", vec![16, 8], -INF, INF)
-    .with_doc("this card's last 16 transactions, newest first; rows past what exists are zero with valid = 0")
-    .with_columns(&[
-        ("amount_log", "ln(1 + amount)", ""),
-        ("mcc_code", "merchant category: 0 grocery, 1 fuel, 2 restaurant, … 23 other", "code"),
-        ("since_last", "minutes since the previous transaction, ln(1 + x)", "ln(min)"),
-        ("your_decision", "0 approve, 1 decline, 2 step-up, -1 not yours", "code"),
-        ("outcome", "1 confirmed fraud, 0 confirmed good, -1 not yet known", "code"),
-        ("valid", "1 for a real row, 0 for padding", "flag"),
-        // …
-    ]);
-
-SeatInit::new(seat, obs, actions)
-    .with_meta("control_hz", 50)
-    .with_meta("reward_lag_ticks", 40)
-    .with_tags(&[Tag::skill(Skill::Classification), Tag::level(Level::Entry)])
-    .with_brief(
-        "Walk to the beacon and stand on it.",
-        "+ progress toward the beacon each tick; − a fall. The episode score is 0–100: …",
-        "The episode ends when the robot falls, or after 20 s.",
-    )
-    .with_metrics(vec![
-        MetricSpec::score("score", "0–100 as described in the brief").headline(),
-        MetricSpec::money("fraud-loss", "approved amount later charged back", "USD").lower_is_better().headline(),
-        MetricSpec::rate("precision", "true alerts over all alerts", "%"),
-        MetricSpec::scenario("scenario-drift-tick", "when the rings changed tactics", "ticks"),
-    ])
-```
-
-`SeatInit::undocumented()` is the audit: it returns every `DocGap` — an empty
-brief paragraph, an observation, action, slice, column or metric with no
-`doc`, and, for values that declare slices, any elements no slice covers, any
-two slices that overlap, and any slice that runs past its value. Environment
-test suites assert it is empty for seat 0. A value with no slices or columns
-(an image plane) is explained by its `doc` alone.
-
-`with_slices(&[(name, len)])` still exists for the undocumented case; every
-slice it builds is reported by the audit.
-
-Rules that make one environment comfortable to work in (the checklist an
-environment is held to, not a style guide across environments):
+The conventions environments follow, so you know what to expect from one to
+the next:
 
 - **One padding mechanism per environment, distinguishable from real
   values.** A trailing `valid` column (1 real, 0 padding) with zero-filled
@@ -468,9 +435,9 @@ the environment chooses it.
 
 ## Versioning
 
-`WIRE_VERSION` (in `SeatInit`) is the layout of THIS document. Bumping it is
-a new wire (a new `docs/wire-v2.md`, new magic numbers if the layout changes
-incompatibly), never an in-place mutation. Three escape valves make most
+The `version` field of `SeatInit` is the layout of THIS document. A new
+version is a new document (and new magic numbers if the layout changes
+incompatibly), never a silent change to this one. Three escape valves make most
 bumps unnecessary: unused `dtype` and `kind` codes can be assigned, `ValueSpec`
 is a length-prefixed region (per-value fields append), and `SeatInit` is
 tail-extensible (sections append after `ends`).
@@ -478,46 +445,35 @@ tail-extensible (sections append after `ends`).
 An environment's `descriptor.payload-schema-version` is its own coordinate on
 top of the wire: it bumps when the environment adds, removes or reshapes an
 observation or action, renames one, or changes what a slice or column means.
-A bump marks every existing agent for that mode stale.
+A bump marks every existing agent for that mode stale: rebuild it
+against the new release (`task create-agent` refreshes the generated
+interface file, then `task build`).
 
-## The complete data surface
+## What else surrounds a match
 
-Where every byte-stream and contract around a match is defined:
+This document covers the three payloads between an environment and your
+agent. For orientation, the rest of a match:
 
-| Surface | What it is | Documented in |
+| Piece | What it is | Where you meet it |
 |---|---|---|
-| `seat-init` / `view` / `input` payloads | The agent-facing wire — this document | here; the reference readers (`wire.rs`, and the template's `reference/rust-wire` + `reference/c-wire`) |
-| `seed` payload | Host-drawn randomness handed to `engine.init` as data; opaque, environment-folded | `wit/engine-v0.2/engine.wit` |
-| archive frames (`frame` payload) | The omniscient per-tick record, the environment's OWN format, read only by its player | `wit/engine-v0.2/engine.wit`; each environment's player |
-| archive container | `SessionArchive` header/frames/trailer (postcard), environment-agnostic | `src/archive.rs` |
-| WIT contracts | The engine, agent, physics, inference and data worlds | `wit/engine-v0.2`, `wit/agent-v0.1`, `wit/physics-v0.1`, `wit/inference-v0.1`, `wit/data-v0.1` |
-| captured `declaration_json` | The decoded seat-0 `SeatInit`, captured by the verifier at release; drives the Interface page, readiness, the report's metric vocabulary and `lockstep_train.info` | platform `docs/registry.md` |
-| assessment tags | The `facet:value` vocabulary an environment declares in `meta.tags` and the platform curates | `src/tags.rs` |
-| iframe SDK | The shell↔player protocol (JSON), unrelated to the agent wire | `docs/frontend-sdk.md` |
+| the agent world | The WebAssembly component interface every agent implements: `init(seat-init)` once, then `on-tick(view) -> input` every tick | `wit/` in the template, vendored into every Rust and C agent it scaffolds |
+| the seed | Randomness the platform draws for each match and hands to the engine; your agent never sees it | the replay page and `task match` report which seed ran |
+| the replay archive | The whole match — every tick the environment recorded — in one file | `out/archive.bin` after `task match`; drop it on [exhibitions.lockstep.it/replay](https://exhibitions.lockstep.it/replay) |
+| session metrics | The numbers an episode ends with, labelled by the `MetricSpec`s above | the end of `task match`, `task report`, a hiring report |
+| assessment tags | The `facet:value` words in `meta.tags` (skill, level, domain) | `task envs`, the catalog filters |
 
 ## Golden fixtures
 
-The wire goldens `{seat_init,view,input}.bin` are the exact encodings of the
-canonical messages built in the reader's `wire_goldens.rs` test; the `.json` twins
-are their decoded forms (`seat_init.json` is the `serde` JSON of
-`wire::SeatInit`; `view.json`/`input.json` list each value's name, dtype and
-decoded elements). The seat-init golden deliberately leaves one slice and one
+The wire goldens `{seat_init,view,input}.bin` are exact encodings of three
+canonical messages, shipped with the reference readers (in the template:
+`reference/rust-wire/tests/fixtures/`). The `.json` twins are their decoded
+forms: `seat_init.json` is the declaration as JSON, and `view.json` /
+`input.json` list each value's name, dtype and decoded elements. A reader in a
+new language is done when it decodes all three and re-encodes them
+byte-for-byte. The seat-init golden deliberately leaves one slice and one
 action undocumented so the empty-string encoding is pinned too, declares one
 rank-2 value with columns, and declares three metrics.
 `seat_init_notail.bin` is the same declaration written without the metric
 tail, frozen, and pins the rule that an absent tail decodes to `metrics = []`.
-Both Rust and the Python decoder in `lockstep-train` test against the same
-files.
-
-## Appendix: history
-
-Version 1 replaced the per-environment FlatBuffers world — a `contract.fbs`,
-generated code on both sides, and a per-environment Python package whose only
-job was decoding it — with the single self-describing layout above. The
-documentation channel (`doc`, `unit`, the brief) was added to version 1 **in
-place** (2026-08-26): the platform, every environment and every decoder
-republished in the same change, so no `SeatInit` written under the old
-layout survived to be misread, and every mode's `payload-schema-version`
-bumped with it. The length-prefixed `ValueSpec` region, `columns`, the
-`MetricSpec` tail and the assessment-tag vocabulary were added the same way;
-the region rule and the tail rule mean an addition no longer needs a cutover.
+The Rust and C references and the Python decoder in `lockstep-train` all test
+against these files.
