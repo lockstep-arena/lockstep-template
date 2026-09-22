@@ -627,10 +627,12 @@ Two ways to make this agent yours:
    on the same observations and packs that instead. Training never touches
    this file.
 
-Then play it: ``task match AGENT={cfg.name}``. Add ``STEP=1`` to pause after
-every tick; to see numbers while you work, run the environment yourself in
-Python (``gymnasium.make("Lockstep/Env-v0", ...)``) and print or use pdb
-there — a trained or exported policy prints nothing during a match.
+Then play it: ``task match AGENT={cfg.name}``. Add ``LOGS=1`` to see, each
+tick, every observation by name and the action it sent (the shell that runs
+the exported graph prints them, and says why whenever it plays the neutral
+action), and ``STEP=1`` to pause after every tick. To look inside the network
+itself, run the environment in your own Python loop
+(``gymnasium.make("Lockstep/Env-v0", ...)``) and print or use pdb there.
 
 What the network must look like (checked when it plays): one input per
 observation, named as declared, at the declared shape; one output with every

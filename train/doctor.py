@@ -77,9 +77,10 @@ def check_task() -> Check:
 #: The oldest CLI whose commands take every flag the template passes
 #: (`--clamp-seats` on `match run` arrived in 0.1.5, `--assessment` on
 #: `agent upload` and `archive report` in 0.1.10, `--agent-logs` / `--step`
-#: / `--until-tick` in 0.1.11). The installer always fetches the newest, so
-#: "update" is the whole fix.
-MIN_CLI = (0, 1, 11)
+#: / `--until-tick` in 0.1.11, `LOCKSTEP_AGENT_LOGS` — which makes a trained
+#: policy show what it sees under `task match LOGS=1` — in 0.1.12). The
+#: installer always fetches the newest, so "update" is the whole fix.
+MIN_CLI = (0, 1, 12)
 
 
 def _parse_version(text: str) -> tuple[int, ...] | None:
@@ -347,7 +348,15 @@ HEADER = "lockstep template doctor"
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--json", action="store_true", help="emit the report as JSON")
+    ap.add_argument(
+        "--check-cli",
+        action="store_true",
+        help="exit 0 when the lockstep CLI is new enough, 1 otherwise, printing nothing "
+        "(what task match's precondition runs)",
+    )
     args = ap.parse_args(argv)
+    if args.check_cli:
+        return 0 if check_cli().ok else 1
     if args.json:
         # Progress goes to stderr so stdout stays a single JSON document.
         print("doctor: running checks…", file=sys.stderr, flush=True)

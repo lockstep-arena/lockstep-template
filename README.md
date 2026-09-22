@@ -134,11 +134,22 @@ task match AGENT=my-bot LOGS=1 STEP=1
   agent's own randomness (Rust's `rand`, C's `getentropy`, anything reading
   WASI random) is seeded from it too. The same command replays the same
   match, so tick 312 is the same tick 312 every time you come back to it.
-- **Trained policies.** A python agent ships as an ONNX file inside a generic
-  shell that prints nothing, so `LOGS=1` stays quiet for it. Step through a
-  match with `STEP=1` to watch it, and debug the policy itself in your own
-  Python loop over `gymnasium.make("Lockstep/Env-v0", engine_source=…)`,
-  where `print` and `pdb` work as usual.
+- **Trained policies.** A python agent is a graph, so it cannot print — the
+  shell that runs it prints for it. With `LOGS=1` you see the reward, every
+  observation by name, and the action it sent, in declared units, each tick:
+
+  ```
+  [seat 0 · t1] reward 4.9952
+  [seat 0 · t1] obs[trunk_quat] = [0.9997 -2.65e-4 -0.01 -0.0214]
+  [seat 0 · t1] obs[beacon_dist] = 3.9081
+  [seat 0 · t1] → action: fr=[0 1.9075 -1.853] fl=[0 1.9075 -1.853] …
+  ```
+
+  When it plays the neutral action instead — no model in the bundle, outputs
+  of the wrong width, an inference error — a line says why. To debug the
+  network itself, use your own Python loop over
+  `gymnasium.make("Lockstep/Env-v0", engine_source=…)`, where `print` and
+  `pdb` work as usual.
 - **Against your other agents.** In an environment with more than one seat,
   `OPPONENTS="other-bot"` puts another of your agents in seat 1; name more,
   space-separated, for further seats. Each must be built for the same
@@ -146,7 +157,7 @@ task match AGENT=my-bot LOGS=1 STEP=1
   your own agent. `task build` prints the right example for the
   environment you are in.
 
-These need the lockstep CLI 0.1.11 or newer; `task doctor` checks.
+These need the lockstep CLI 0.1.12 or newer; `task doctor` checks.
 
 <details>
 <summary><strong>Reading an environment: <code>task info</code> and the generated interface</strong></summary>

@@ -165,11 +165,13 @@ tasks:
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
-      # The flags below need CLI >= 0.1.11 (--agent-logs, --step, --until-tick
-      # and seeded agent randomness); an older one fails with "unexpected
-      # argument", which says nothing useful.
-      - sh: lockstep match run --help 2>/dev/null | grep -q -- '--agent-logs'
-        msg: "lockstep CLI is too old for task match (needs 0.1.11+) — update it: curl -fsSL https://dl.lockstep.it/install.sh | sh   (task doctor checks this too)"
+      # Needs CLI >= 0.1.12: --agent-logs / --step / --until-tick and seeded
+      # agent randomness (0.1.11), and LOCKSTEP_AGENT_LOGS so a trained policy
+      # shows what it sees (0.1.12). An older one fails with "unexpected
+      # argument" or prints nothing for a python agent, which says nothing
+      # useful. doctor holds the one minimum version.
+      - sh: python3 -m train.doctor --check-cli
+        msg: "lockstep CLI is too old for task match (needs 0.1.12+) — update it: curl -fsSL https://dl.lockstep.it/install.sh | sh   (task doctor checks this too)"
       - sh: test -z "{{.OPPONENTS}}" || test -z "{{.BUNDLE}}"
         msg: "OPPONENTS= seats your other agents next to AGENT= — it does not combine with BUNDLE="
     cmds:

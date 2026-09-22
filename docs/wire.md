@@ -375,6 +375,14 @@ fixed by the declaration:
   shape does not (a transposed `[40, 64]` for a declared `[64, 40]`) is
   refused by the shell and by `lockstep-train`'s encoder; it never becomes a
   silently-misread action.
+- **It tells you what it did, locally.** A graph cannot print, so the shell
+  prints for it when the agent's environment carries
+  `LOCKSTEP_AGENT_LOGS=1` — which `task match LOGS=1` (the CLI's
+  `--agent-logs`) sets and a ranked match never does: what it feeds the
+  model, every observation by slice or column name each tick, the action it
+  sent in declared units, and the reason whenever it played the neutral
+  action instead (a missing model, an output of the wrong width, an
+  inference error).
 
 ## How environments document themselves
 
