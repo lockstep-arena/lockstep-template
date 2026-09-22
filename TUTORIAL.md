@@ -430,12 +430,41 @@ After every tick the match stops and asks:
 
 Enter plays one more tick, `c` runs to the end, `12` runs to tick 12 and asks
 again, and `q` stops with the archive of what was played. `UNTIL=12` does the
-running for you and pauses at tick 12. A Python agent prints nothing during a
-match (it ships as an ONNX file inside a generic shell), so to see numbers
-while you work, run the environment in your own loop —
-`gymnasium.make("Lockstep/Env-v0", engine_source=...)` — and `print` there.
-The Rust and C agents below can print from inside the match; see
-[their section](#the-advanced-track-rust-and-c).
+running for you and pauses at tick 12.
+
+Add `LOGS=1` to see what walker sees and does. It is a trained graph, so it
+cannot print — the shell that runs it prints for it:
+
+```sh
+task match AGENT=walker LOGS=1 UNTIL=1
+```
+
+```
+[seat 0 · init] ONNX policy `policy`: feeding obs f32[54] · reading action f32[12] (in [-1, 1], mapped onto the declared bounds)
+[seat 0 · t0] reward 0
+[seat 0 · t0] obs[trunk_quat] = [0.9998 0 0 -0.0214]
+[seat 0 · t0] obs[trunk_angvel] = [0 0 0]
+[seat 0 · t0] obs[trunk_linvel] = [0 0 0]
+[seat 0 · t0] obs[joint_pos] = [0 0.9 -1.8 0 0.9 -1.8 0 0.9 … 12 values]
+[seat 0 · t0] obs[joint_vel] = [0 0 0 0 0 0 0 0 … 12 values]
+[seat 0 · t0] obs[last_action] = [0 0.9 -1.8 0 0.9 -1.8 0 0.9 … 12 values]
+[seat 0 · t0] obs[beacon_body] = [-2.7623 2.7626 -0.12]
+[seat 0 · t0] obs[beacon_dist] = 3.9067
+[seat 0 · t0] obs[time_left] = 1
+[seat 0 · t0] obs[gravity_body] = [0 0 -1]
+[seat 0 · t0] → action: fr=[0 1.9075 -1.853] fl=[0 1.9075 -1.853] rr=[0 1.9075 -1.853] rl=[0 1.9075 -1.853]
+[seat 0 · t1] reward 4.9952
+…
+```
+
+Every observation is named by the same slices `interface.py` uses, and the
+action is in the declared units, after the `[-1, 1]` outputs were mapped onto
+each joint's range. If the policy ever plays the neutral action instead, a
+line says why (no model in the bundle, outputs of the wrong width, an
+inference error). To look inside the network itself, run the environment in
+your own loop — `gymnasium.make("Lockstep/Env-v0", engine_source=...)` — and
+`print` or use `pdb` there. The Rust and C agents below print whatever you
+tell them to; see [their section](#the-advanced-track-rust-and-c).
 
 Every run of `task match` is the same match: the seed is fixed, and your
 agent's own randomness is seeded from it. What you see at tick 12 today is
