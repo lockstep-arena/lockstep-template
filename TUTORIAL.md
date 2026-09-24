@@ -21,7 +21,7 @@ running checks… (the venv check imports the training stack; give it a moment)
   ✓ lockstep CLI      lockstep 0.1.4 at ~/.cargo/bin/lockstep
   ✗ venv              no .venv/ yet
     fix → task setup   (creates .venv and installs the training stack)
-  ✓ LOCKSTEP_API_KEY  set (only `task upload` needs it)
+  ✓ LOCKSTEP_API_KEY  set, verified (signs in `task upload` and assessment-only engine downloads)
   · Rust toolchain    not installed — only needed for LANG=rust agents
     fix → task setup LANGS=rust   (or https://rustup.rs then: rustup target add wasm32-wasip2)
   · C toolchain       wasi-sdk + wit-bindgen missing — only needed for LANG=c agents

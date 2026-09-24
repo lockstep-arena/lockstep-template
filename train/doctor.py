@@ -11,8 +11,12 @@ Required: Python >= 3.11, Task, the lockstep CLI, the venv with
 lockstep-train installed. Per-language toolchains are REQUIRED exactly when
 an agent of that language exists under agents/ (else reported as optional):
 rust = cargo + the wasm32-wasip2 target; c = wasi-sdk + wit-bindgen.
-Optional always: LOCKSTEP_API_KEY (only `task upload` needs it), the keyed
-engine cache (filled on demand).
+LOCKSTEP_API_KEY is REQUIRED when an agent targets an assessment-only
+environment (its engine downloads only with the key) or when the key is set
+but the API rejects it; otherwise optional (`task upload` needs it). The key
+check asks the API (stdlib urllib, short timeout) and never fails when the
+API cannot be reached. Optional always: the keyed engine cache (filled on
+demand).
 """
 
 from __future__ import annotations
@@ -146,6 +150,58 @@ def check_venv() -> Check:
     return Check("venv", True, True, f".venv ready — lockstep-train {out}")
 
 
+API_TIMEOUT = 5.0
+MINT_KEY = "paste a key from the Authorization page at https://lockstep.it into LOCKSTEP_API_KEY= in .env"
+
+
+def _api_post(route: str, body: dict, key: str = "") -> tuple[int, dict]:
+    """POST to the platform API: `(status, json)`, or `(0, {})` when it
+    cannot be reached — the key check must never fail on a flaky network."""
+    import urllib.error
+    import urllib.request
+
+    base = os.environ.get("LOCKSTEP_API_URL", "https://api.lockstep.it").rstrip("/")
+    headers = {"Content-Type": "application/json", "User-Agent": "lockstep-template-doctor"}
+    if key:
+        headers["X-LOCKSTEP-API-TOKEN"] = key
+    req = urllib.request.Request(f"{base}/{route}", data=json.dumps(body).encode(), headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=API_TIMEOUT) as resp:  # noqa: S310 — https API URL
+            return resp.status, json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, {}
+    except (urllib.error.URLError, OSError, ValueError):
+        return 0, {}
+
+
+def _agent_envs() -> dict[str, str]:
+    """`{env slug: an agent that targets it}` for the agents under agents/."""
+    import tomllib
+
+    envs: dict[str, str] = {}
+    agents = ROOT / "agents"
+    if agents.is_dir():
+        for toml in sorted(agents.glob("*/agent.toml")):
+            try:
+                env = tomllib.loads(toml.read_text()).get("agent", {}).get("env", "")
+            except (OSError, tomllib.TOMLDecodeError):
+                continue
+            if env:
+                envs.setdefault(env, toml.parent.name)
+    return envs
+
+
+def _needs_key(env: str) -> bool:
+    """An assessment-only environment: the API hands its engine only to a
+    signed-in caller, so an anonymous look shows a published mode with no
+    engine to download (the same test `lockstep_train.fetch` refuses on)."""
+    status, payload = _api_post("environment/get", {"id": env})
+    if status != 200:
+        return False
+    modes = (payload.get("environment") or {}).get("modes") or []
+    return any(m.get("release") and not m["release"].get("engine_object_key") for m in modes)
+
+
 def check_api_key() -> Check:
     key = os.environ.get("LOCKSTEP_API_KEY", "").strip()
     if not key:
@@ -156,13 +212,40 @@ def check_api_key() -> Check:
                     key = line.split("=", 1)[1].strip()
                     break
     if key:
-        return Check("LOCKSTEP_API_KEY", True, False, "set (only `task upload` needs it)")
+        status, _ = _api_post("account/profile", {}, key)
+        if status in (401, 403):
+            return Check(
+                "LOCKSTEP_API_KEY",
+                False,
+                True,
+                "set, but the API rejects it (revoked, expired or mistyped)",
+                "mint a new key on the Authorization page at https://lockstep.it and replace LOCKSTEP_API_KEY= in .env",
+            )
+        verified = "verified" if status == 200 else "not verified — the API was unreachable"
+        return Check(
+            "LOCKSTEP_API_KEY",
+            True,
+            False,
+            f"set, {verified} (signs in `task upload` and assessment-only engine downloads)",
+        )
+    gated = [(env, agent) for env, agent in _agent_envs().items() if _needs_key(env)]
+    if gated:
+        env, agent = gated[0]
+        return Check(
+            "LOCKSTEP_API_KEY",
+            False,
+            True,
+            f"not set — agents/{agent} targets {env}, an assessment-only environment: "
+            "its engine downloads only with your key (info / train / build / match need it)",
+            f"cp .env.example .env, then {MINT_KEY}",
+        )
     return Check(
         "LOCKSTEP_API_KEY",
         False,
         False,
-        "not set — everything except `task upload` works without it",
-        "cp .env.example .env, then paste a key from the Authorization page at https://lockstep.it into LOCKSTEP_API_KEY=",
+        "not set — `task upload` needs it, and so does every task on an assessment-only "
+        "environment (one a company invited you to)",
+        f"cp .env.example .env, then {MINT_KEY}",
     )
 
 

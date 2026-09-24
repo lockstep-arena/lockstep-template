@@ -81,8 +81,11 @@ the generic agent shell as WASM from the release). The
 [hand-written wasm track](#the-wasm-story) is one `task setup LANGS=rust`
 (or `LANGS=c`) away.
 
-For `task upload` only: an API key. Copy `.env.example` to `.env` and fill in
-`LOCKSTEP_API_KEY` (create a key on the Authorization page at lockstep.it).
+An API key, for `task upload` — and for everything on an assessment-only
+environment (one a company invited you to), whose engine downloads only with
+it. Copy `.env.example` to `.env` and fill in `LOCKSTEP_API_KEY` (create a key
+on the Authorization page at lockstep.it); `task doctor` says whether you need
+it and whether the API accepts it.
 
 ## Commands
 
