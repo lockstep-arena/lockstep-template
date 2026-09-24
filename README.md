@@ -13,7 +13,7 @@ per-environment.
 ## Ten lines to a real match
 
 ```sh
-git clone https://github.com/lockstep-arena/lockstep-template
+git clone https://github.com/lockstep-it/lockstep-template
 cd lockstep-template
 task doctor                      # what this machine is missing, and the exact fix for each
 task quickstart ENV=go1-beacon   # setup → create-agent → build → a real local match

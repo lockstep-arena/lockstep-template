@@ -7,7 +7,7 @@ quadruped walking to a beacon) is the worked example because its brief is
 short; every other slug is the same commands.
 
 ```sh
-git clone https://github.com/lockstep-arena/lockstep-template
+git clone https://github.com/lockstep-it/lockstep-template
 cd lockstep-template
 task doctor
 ```
